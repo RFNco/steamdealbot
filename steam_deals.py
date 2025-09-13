@@ -29,7 +29,7 @@ class SteamDealDetector:
             deals = []
             
             # Look for specials in the API response
-            if 'specials' in data:
+            if 'specials' in data and 'items' in data['specials']:
                 for item in data['specials']['items'][:10]:
                     try:
                         game_name = item.get('name', 'Unknown Game')
@@ -37,10 +37,18 @@ class SteamDealDetector:
                         final_price = item.get('final_price', 0)
                         original_price = item.get('original_price', 0)
                         
-                        if discount_percent > 0:
+                        if discount_percent and discount_percent > 0:
                             # Convert price from cents to dollars
                             final_price_dollars = final_price / 100
                             original_price_dollars = original_price / 100
+                            
+                            # Get game description (with fallback)
+                            steam_url = f"https://store.steampowered.com/app/{item.get('id', '')}/"
+                            try:
+                                game_info = self.get_game_info(game_name, steam_url)
+                                description = game_info['description']
+                            except:
+                                description = f"An amazing game with {discount_percent}% off! Don't miss this deal!"
                             
                             deal = {
                                 'name': game_name,
@@ -48,8 +56,8 @@ class SteamDealDetector:
                                 'price': f"${final_price_dollars:.2f}",
                                 'original_price': f"${original_price_dollars:.2f}",
                                 'source': 'Steam Popular Deals',
-                                'description': 'A great game on sale!',
-                                'steam_url': f"https://store.steampowered.com/app/{item.get('id', '')}/"
+                                'description': description,
+                                'steam_url': steam_url
                             }
                             deals.append(deal)
                     except Exception as e:
@@ -60,6 +68,71 @@ class SteamDealDetector:
         except Exception as e:
             print(f"Error fetching Steam API deals: {e}")
             return []
+    
+    def get_game_info(self, game_name, steam_url):
+        """Get game information from Steam store page."""
+        try:
+            response = self.session.get(steam_url, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Try to find game description in multiple ways
+            description = None
+            
+            # Method 1: Look for the game description snippet (most reliable)
+            desc_elem = soup.select_one('div.game_description_snippet')
+            if desc_elem:
+                description = desc_elem.get_text().strip()
+            
+            # Method 2: Look for meta description
+            if not description:
+                meta_desc = soup.select_one('meta[name="description"]')
+                if meta_desc and meta_desc.get('content'):
+                    description = meta_desc.get('content').strip()
+            
+            # Method 3: Look for game area description
+            if not description:
+                desc_elem = soup.select_one('div.game_area_description')
+                if desc_elem:
+                    description = desc_elem.get_text().strip()
+            
+            # Method 4: Look for any paragraph with game info
+            if not description:
+                paragraphs = soup.select('div.game_area_description p')
+                for p in paragraphs:
+                    text = p.get_text().strip()
+                    if len(text) > 50 and len(text) < 300:
+                        description = text
+                        break
+            
+            # Clean up description
+            if description:
+                # Remove extra whitespace and newlines
+                description = ' '.join(description.split())
+                
+                # Truncate if too long
+                if len(description) > 200:
+                    description = description[:200].rsplit(' ', 1)[0] + "..."
+                
+                # Ensure it ends with proper punctuation
+                if not description.endswith(('.', '!', '?')):
+                    description += "."
+            else:
+                # Fallback description based on game name
+                description = f"Experience {game_name} - an exciting game now on sale!"
+            
+            return {
+                'description': description,
+                'steam_url': steam_url
+            }
+            
+        except Exception as e:
+            # Fallback description based on game name
+            return {
+                'description': f"Experience {game_name} - an exciting game now on sale!",
+                'steam_url': steam_url
+            }
     
     def get_steam_specials_page(self):
         """Get deals from Steam's specials page with better parsing."""
@@ -123,13 +196,16 @@ class SteamDealDetector:
                     if len(game_name) < 3:
                         continue
                     
+                    # Get game description
+                    game_info = self.get_game_info(game_name, steam_url)
+                    
                     deal = {
                         'name': game_name,
                         'discount': discount,
                         'price': price,
                         'original_price': None,
                         'source': 'Steam Daily Deals',
-                        'description': 'A great game on sale!',
+                        'description': game_info['description'],
                         'steam_url': steam_url
                     }
                     deals.append(deal)
@@ -193,13 +269,16 @@ class SteamDealDetector:
                     if len(game_name) < 3:
                         continue
                     
+                    # Get game description
+                    game_info = self.get_game_info(game_name, steam_url)
+                    
                     deal = {
                         'name': game_name,
                         'discount': discount,
                         'price': price,
                         'original_price': None,
                         'source': 'Steam Featured Deals',
-                        'description': 'A great game on sale!',
+                        'description': game_info['description'],
                         'steam_url': steam_url
                     }
                     deals.append(deal)
@@ -221,7 +300,7 @@ class SteamDealDetector:
                 'discount': '-50%',
                 'price': '$9.99',
                 'original_price': '$19.99',
-                'source': 'Steam Specials',
+                'source': 'Steam Popular Deals',
                 'description': 'Massive discounts on thousands of games during Steam\'s biggest sale event!',
                 'steam_url': 'https://store.steampowered.com/specials/'
             },
@@ -230,7 +309,7 @@ class SteamDealDetector:
                 'discount': '-75%',
                 'price': '$4.99',
                 'original_price': '$19.99',
-                'source': 'Steam Specials',
+                'source': 'Steam Popular Deals',
                 'description': 'Amazing collection of indie games at an incredible discount!',
                 'steam_url': 'https://store.steampowered.com/specials/'
             },
@@ -239,7 +318,7 @@ class SteamDealDetector:
                 'discount': '-30%',
                 'price': '$34.99',
                 'original_price': '$49.99',
-                'source': 'Steam Specials',
+                'source': 'Steam Popular Deals',
                 'description': 'Popular AAA titles at discounted prices!',
                 'steam_url': 'https://store.steampowered.com/specials/'
             }
