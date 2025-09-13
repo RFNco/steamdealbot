@@ -1,5 +1,5 @@
 from flask import Flask, render_template_string, jsonify
-from steam_deals_enhanced import SteamDealDetector
+from steam_deals import SteamDealDetector
 import json
 
 app = Flask(__name__)

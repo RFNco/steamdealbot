@@ -1,7 +1,7 @@
 import os
 import tweepy
 from dotenv import load_dotenv
-from steam_deals_enhanced import SteamDealDetector
+from steam_deals import SteamDealDetector
 
 # Load environment variables from .env file
 load_dotenv()

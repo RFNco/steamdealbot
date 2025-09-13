@@ -4,7 +4,7 @@ SteamDealBot Manual Poster
 A simple script to get deals and make them easy to copy for manual posting.
 """
 
-from steam_deals_enhanced import SteamDealDetector
+from steam_deals import SteamDealDetector
 import pyperclip
 import time
 
