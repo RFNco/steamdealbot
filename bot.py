@@ -1,6 +1,7 @@
 import os
 import tweepy
 from dotenv import load_dotenv
+from steam_deals_simple import SteamDealDetector
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,6 +28,25 @@ def create_twitter_client():
     api = tweepy.API(auth, wait_on_rate_limit=True)
     
     return api
+
+def post_tweet(api, message):
+    """Post a tweet using the provided API client."""
+    try:
+        # Verify credentials
+        api.verify_credentials()
+        print("✅ Twitter API credentials verified successfully!")
+        
+        # Post the tweet
+        response = api.update_status(message)
+        print(f"✅ Tweet posted successfully! Tweet ID: {response.id}")
+        print(f"📝 Tweet content: {message}")
+        
+    except tweepy.TweepyException as e:
+        print(f"❌ Error posting tweet: {e}")
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise
 
 def test_api_access(api):
     """Test API access with available endpoints."""
@@ -65,7 +85,25 @@ def main():
         # Create Twitter client
         api = create_twitter_client()
         
-        # Test API access (since posting requires higher access level)
+        # Get Steam deals
+        print("🎮 Fetching Steam deals...")
+        deal_detector = SteamDealDetector()
+        deal_tweet = deal_detector.get_best_deal_tweet()
+        
+        print(f"📝 Deal tweet prepared: {deal_tweet}")
+        print(f"📏 Tweet length: {len(deal_tweet)} characters")
+        
+        # Try to post the tweet (will fail with current API access)
+        try:
+            post_tweet(api, deal_tweet)
+        except Exception as e:
+            print(f"⚠️  Could not post tweet (API access limitation): {e}")
+            print("📝 Tweet content that would be posted:")
+            print("=" * 50)
+            print(deal_tweet)
+            print("=" * 50)
+        
+        # Test API access
         test_api_access(api)
         
         print("🎉 Bot execution completed successfully!")
