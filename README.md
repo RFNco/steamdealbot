@@ -121,6 +121,25 @@ Then open: http://localhost:5000
 - ✅ One-click "Open Twitter" button
 - ✅ Mobile-friendly
 
+### Method 4: Android (Termux)
+
+Run the manual poster on Android using Termux:
+
+```bash
+# Install Termux + Termux:API from F-Droid first
+pkg update -y && pkg install -y python termux-api git
+# Get the code
+git clone https://github.com/yourusername/steamdealbot.git
+cd steamdealbot
+# Install minimal deps (skip requirements.txt to avoid lxml build issues)
+pip install requests beautifulsoup4 pyperclip
+# Run
+python manual_poster.py
+```
+
+- Clipboard: With Termux:API installed, the script auto-uses `termux-clipboard-set` if `pyperclip` isn’t available.
+- You can also copy the folder via file manager and `cd` into it instead of cloning.
+
 ## GitHub Actions Setup
 
 The bot runs automatically every 6 hours using GitHub Actions. To set this up:

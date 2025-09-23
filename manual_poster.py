@@ -2,11 +2,79 @@
 """
 SteamDealBot Manual Poster
 A simple script to get deals and make them easy to copy for manual posting.
+
+Android (Termux) quick start:
+  1) Install Termux + Termux:API from F‑Droid
+  2) In Termux run:
+       pkg update -y && pkg install -y python termux-api
+       cd ~/storage/downloads/steamdealbot   # or git clone then cd
+       pip install requests beautifulsoup4 pyperclip
+       python manual_poster.py
+  Clipboard: If pyperclip is missing or fails, this script falls back to
+  `termux-clipboard-set` automatically when available.
 """
 
 from steam_deals import SteamDealDetector
-import pyperclip
 import time
+import sys
+import os
+import shutil
+import subprocess
+
+# Try to import pyperclip optionally; we provide fallbacks below
+try:
+    import pyperclip  # type: ignore
+    _HAS_PYPERCLIP = True
+except Exception:
+    pyperclip = None  # type: ignore
+    _HAS_PYPERCLIP = False
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """
+    Copy text to the system clipboard using the best available method.
+
+    Order of attempts:
+    1) pyperclip (if installed)
+    2) Termux (Android): termux-clipboard-set
+    3) macOS: pbcopy
+    4) Windows: clip
+    Returns True if successful, False otherwise.
+    """
+
+    # 1) pyperclip
+    if _HAS_PYPERCLIP:
+        try:
+            pyperclip.copy(text)
+            return True
+        except Exception:
+            pass
+
+    # 2) Termux (Android)
+    if shutil.which("termux-clipboard-set"):
+        try:
+            subprocess.run(["termux-clipboard-set"], input=text, text=True, check=True)
+            return True
+        except Exception:
+            pass
+
+    # 3) macOS pbcopy
+    if sys.platform == "darwin" and shutil.which("pbcopy"):
+        try:
+            subprocess.run(["pbcopy"], input=text, text=True, check=True)
+            return True
+        except Exception:
+            pass
+
+    # 4) Windows clip
+    if os.name == "nt" and shutil.which("clip"):
+        try:
+            subprocess.run(["clip"], input=text, text=True, check=True)
+            return True
+        except Exception:
+            pass
+
+    return False
 
 def main():
     print("🎮 SteamDealBot Manual Poster")
@@ -47,15 +115,15 @@ def main():
                           "Choice (1-4): ").strip()
             
             if choice == '1':
-                try:
-                    pyperclip.copy(tweet)
+                if copy_to_clipboard(tweet):
                     print("✅ Tweet copied to clipboard! You can now paste it on Twitter.")
-                except ImportError:
-                    print("❌ pyperclip not installed. Install it with: pip install pyperclip")
-                    print("Or manually copy the tweet above.")
-                except Exception as e:
-                    print(f"❌ Error copying to clipboard: {e}")
-                    print("Please manually copy the tweet above.")
+                else:
+                    print("❌ Could not copy to clipboard automatically.")
+                    if not _HAS_PYPERCLIP:
+                        print("Tip: Install pyperclip with: pip install pyperclip")
+                    if shutil.which("termux-clipboard-set"):
+                        print("You can also run: echo \"<tweet>\" | termux-clipboard-set")
+                    print("Please manually copy the tweet above if needed.")
                 
                 input("\nPress Enter to continue...")
                 

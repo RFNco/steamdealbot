@@ -94,7 +94,7 @@ HTML_TEMPLATE = """
         <h1>🎮 SteamDealBot - Manual Posting</h1>
         
         <div style="text-align: center;">
-            <button class="refresh-btn" onclick="refreshDeals()">🔄 Refresh Deals</button>
+            <button class="refresh-btn" onclick="refreshDeals()">Refresh Deals</button>
         </div>
         
         <div id="status" class="status info">
@@ -108,7 +108,7 @@ HTML_TEMPLATE = """
 
     <script>
         function refreshDeals() {
-            document.getElementById('status').innerHTML = '🔄 Loading deals...';
+            document.getElementById('status').innerHTML = 'Loading deals...';
             document.getElementById('status').className = 'status info';
             
             fetch('/api/deals')
@@ -148,10 +148,10 @@ HTML_TEMPLATE = """
                     </div>
                     
                     <button class="copy-btn" onclick="copyToClipboard('tweet-${index}')">
-                        📋 Copy Tweet
+                        Copy Tweet
                     </button>
                     <button class="copy-btn" onclick="openTwitter('${deal.tweet}')">
-                        🐦 Open Twitter
+                        Open Twitter
                     </button>
                 `;
                 container.appendChild(dealCard);
@@ -221,7 +221,7 @@ def get_deals():
         })
 
 if __name__ == '__main__':
-    print("🌐 Starting SteamDealBot Web Interface...")
-    print("📱 Open your browser and go to: http://localhost:5000")
-    print("🔄 Press Ctrl+C to stop the server")
+    print("Starting SteamDealBot Web Interface...")
+    print("Open your browser and go to: http://localhost:5000")
+    print("Press Ctrl+C to stop the server")
     app.run(debug=True, host='0.0.0.0', port=5000)
