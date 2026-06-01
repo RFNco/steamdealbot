@@ -14,7 +14,7 @@ Android (Termux) quick start:
   `termux-clipboard-set` automatically when available.
 """
 
-from steam_deals import SteamDealDetector
+from steam_deals import SteamDealDetector, TWEET_MAX_LENGTH
 import time
 import sys
 import os
@@ -28,6 +28,31 @@ try:
 except Exception:
     pyperclip = None  # type: ignore
     _HAS_PYPERCLIP = False
+
+BANNER = (
+    "   ____________________    __  ___ \n"
+    "  / ___/_  __/ ____/   |  /  |/  / \n"
+    "  \\__ \\ / / / __/ / /| | / /|_/ /  \n"
+    " ___/ // / / /___/ ___ |/ /  / /   \n"
+    "/_______/ _________  |___/  /_/    \n"
+    "   / __ \\/ ____/   |  / /          \n"
+    "  / / / / __/ / /| | / /           \n"
+    " / /_/ / /___/ ___ |/ /___         \n"
+    "/_____________/ _________/         \n"
+    "   / __ )/ __ \\/_  __/             \n"
+    "  / __  / / / / / /                \n"
+    " / /_/ / /_/ / / /                 \n"
+    "/_____/\\____/ /_/  ©RFNco           \n"
+)
+
+SEPARATOR = "=" * 50
+
+def print_banner() -> None:
+    print(BANNER)
+    print()
+    print(SEPARATOR)
+    print("Manual Poster")
+    print(SEPARATOR)
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -77,31 +102,30 @@ def copy_to_clipboard(text: str) -> bool:
     return False
 
 def main():
-    print("🎮 SteamDealBot Manual Poster")
-    print("=" * 50)
-    
+    print_banner()
+
     detector = SteamDealDetector()
     
     while True:
-        print("\n🔄 Fetching latest Steam deals...")
+        print("Fetching latest Steam deals...")
         deals = detector.get_all_deals()
         
         if not deals:
-            print("❌ No deals found. Try again later.")
+            print("No deals found. Try again later.")
             continue
         
-        print(f"\n✅ Found {len(deals)} deals!")
+        print(f"Found {len(deals)} deals!")
         print("\n" + "=" * 50)
         
         for i, deal in enumerate(deals, 1):
-            print(f"\n🎮 Deal #{i}: {deal['name']}")
-            print(f"💰 Price: {deal['price']} ({deal['discount']})")
-            print(f"🏷️ Source: {deal['source']}")
+            print(f"\nDeal #{i}: {deal['name']}")
+            print(f"Price: {deal['price']} ({deal['discount']})")
+            print(f"Source: {deal['source']}")
             
             # Format the tweet
             tweet = detector.format_deal_tweet(deal)
             
-            print(f"\n📝 Tweet ({len(tweet)} characters):")
+            print(f"\nTweet ({len(tweet)}/{TWEET_MAX_LENGTH} characters):")
             print("-" * 30)
             print(tweet)
             print("-" * 30)
@@ -116,9 +140,9 @@ def main():
             
             if choice == '1':
                 if copy_to_clipboard(tweet):
-                    print("✅ Tweet copied to clipboard! You can now paste it on Twitter.")
+                    print("Tweet copied to clipboard! You can now paste it on 𝕏.")
                 else:
-                    print("❌ Could not copy to clipboard automatically.")
+                    print("Could not copy to clipboard automatically.")
                     if not _HAS_PYPERCLIP:
                         print("Tip: Install pyperclip with: pip install pyperclip")
                     if shutil.which("termux-clipboard-set"):
@@ -134,15 +158,15 @@ def main():
                 break
                 
             elif choice == '4':
-                print("👋 Goodbye!")
+                print("Goodbye!")
                 return
                 
             else:
-                print("❌ Invalid choice. Please try again.")
+                print("Invalid choice. Please try again.")
         
         # Ask if user wants to refresh
         if len(deals) > 0:
-            refresh = input("\n🔄 Refresh deals? (y/n): ").strip().lower()
+            refresh = input("\nRefresh deals? (y/n): ").strip().lower()
             if refresh != 'y':
                 break
 
@@ -150,7 +174,7 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n👋 Goodbye!")
+        print("\n\nGoodbye!")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\nError: {e}")
         print("Please check your internet connection and try again.")

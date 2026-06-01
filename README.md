@@ -1,16 +1,18 @@
-# SteamDealBot 🚀
+# SteamDealBot
 
-A Twitter (X) bot that automatically finds and posts Steam game deals with detailed descriptions and store links. This bot runs every 6 hours using GitHub Actions to keep your followers updated with the latest gaming discounts.
+A Twitter (𝕏) bot that automatically finds and posts Steam game deals with detailed descriptions and store links. This bot runs every 6 hours using GitHub Actions to keep your followers updated with the latest gaming discounts.
 
 ## Features
 
-- 🎮 **Real Steam Deal Detection**: Automatically scrapes Steam for current game discounts
-- 📝 **Rich Tweet Format**: Posts engaging tweets with game descriptions and Steam store links
-- 🤖 **Automated Posting**: Runs every 6 hours via GitHub Actions
-- 🔍 **Smart Deal Selection**: Finds the best deals with highest discount percentages
-- 🔐 **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
-- 📦 **Easy Setup**: Simple installation and deployment process
-- 🏷️ **Professional Formatting**: Clean, engaging tweet format with hashtags and links
+- **Real Steam Deal Detection**: Automatically scrapes Steam for current game discounts
+- **Rich Tweet Format**: Posts engaging tweets with game descriptions and Steam store links
+- **Automated Posting**: Runs every 6 hours via GitHub Actions
+- **Smart Deal Selection**: Finds the best deals with highest discount percentages
+- **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
+- **Easy Setup**: Simple installation and deployment process
+- **Professional Formatting**: Clean tweet format with hashtags and Steam store links
+- **232-Character Tweets**: Each deal tweet is auto-fitted to 232 characters (configurable in `steam_deals.py`)
+- **Manual Poster CLI**: Terminal tool with ASCII banner, plain-text prompts, and copy-to-clipboard for 𝕏
 
 ## Prerequisites
 
@@ -55,23 +57,23 @@ TWITTER_BEARER_TOKEN=your_bearer_token_here
 python bot.py
 ```
 
-If everything is set up correctly, you should see:
+If everything is set up correctly, you should see output similar to:
 ```
-🚀 Starting SteamDealBot...
-🎮 Fetching Steam deals...
-🔍 Searching for Steam deals...
-✅ Found 11 unique deals
-📝 Deal tweet prepared: 🏷️It Takes Two -75% off!
+Starting SteamDealBot...
+Fetching Steam deals...
+Searching for Steam deals...
+Found 11 unique deals
+Deal tweet prepared: 🏷️It Takes Two -75% off!
 $9.99  |  Steam Popular Deals
 
 A great game on sale!
 
 https://store.steampowered.com/app/1426210/
 #SteamDeals #Gaming #Deals #ItTakesTwo
-📏 Tweet length: 161 characters
-✅ Twitter API credentials verified successfully!
-⚠️  Could not post tweet (API access limitation): 403 Forbidden
-📝 Tweet content that would be posted:
+Tweet length: 161 characters (max 232 when formatted via steam_deals.py)
+Twitter API credentials verified successfully!
+Could not post tweet (API access limitation): 403 Forbidden
+Tweet content that would be posted:
 ==================================================
 🏷️It Takes Two -75% off!
 $9.99  |  Steam Popular Deals
@@ -81,7 +83,7 @@ A great game on sale!
 https://store.steampowered.com/app/1426210/
 #SteamDeals #Gaming #Deals #ItTakesTwo
 ==================================================
-🎉 Bot execution completed successfully!
+Bot execution completed successfully!
 ```
 
 ## Manual Usage (Free API Tier)
@@ -94,18 +96,23 @@ Since the free Twitter API tier doesn't allow posting tweets, you can use these 
 python manual_poster.py
 ```
 
+On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster** header, then an interactive loop to browse deals.
+
 **Features:**
-- ✅ Shows 11+ real Steam deals with USD prices
-- ✅ One-click copy to clipboard
-- ✅ Interactive menu to browse deals
-- ✅ Easy refresh for new deals
+- ASCII banner on startup (©RFNco)
+- Plain-text terminal UI (no decorative emoji in prompts)
+- Shows real Steam deals with USD prices
+- Copy tweet to clipboard for posting on 𝕏
+- Character count per tweet shown as `187/232` (see [Tweet length limit](#tweet-length-limit))
+- Menu: copy tweet, next deal, refresh, or exit
+- Clipboard fallbacks: pyperclip, Termux, macOS `pbcopy`, Windows `clip`
 
 ### Method 2: Desktop Shortcut (Windows)
 
 1. **Double-click** `SteamDealBot.bat`
 2. **Follow the prompts** to get deals
 3. **Press 1** to copy tweet to clipboard
-4. **Paste on Twitter** and post!
+4. **Paste on 𝕏** and post!
 
 ### Method 3: Web Interface
 
@@ -116,10 +123,10 @@ python web_interface.py
 Then open: http://localhost:5000
 
 **Features:**
-- ✅ Beautiful web interface
-- ✅ Click to copy tweets
-- ✅ One-click "Open Twitter" button
-- ✅ Mobile-friendly
+- Web interface for browsing deals
+- Click to copy tweets
+- One-click "Open Twitter" button
+- Mobile-friendly layout
 
 ### Method 4: Android (Termux)
 
@@ -181,16 +188,7 @@ steamdealbot/
 
 1. **Deal Detection**: Uses Steam's API to find real game discounts (finds 11+ deals)
 2. **Data Processing**: Extracts game names, USD prices, discount percentages, and Steam store URLs
-3. **Tweet Formatting**: Creates engaging tweets with the format:
-   ```
-   🏷️Game Name -XX% off!
-   $XX.XX  |  Steam Popular Deals
-   
-   Game description here...
-   
-   https://store.steampowered.com/app/XXXXXX/Game_Name/
-   #SteamDeals #Gaming #Deals #GameName
-   ```
+3. **Tweet Formatting**: Builds each tweet (max **232 characters**), keeping title, price, link, and hashtags; shortens the description when needed (see [Tweet Format](#tweet-format))
 4. **Posting**: 
    - **Automated**: Posts via Twitter API (requires Basic/Pro access level)
    - **Manual**: Copy-paste method for free API tier users
@@ -199,36 +197,48 @@ steamdealbot/
 
 ## Tweet Format
 
-The bot creates engaging tweets in this format:
+Each deal is formatted like this (one 🏷️ prefix in the tweet body):
 
 ```
 🏷️Palworld -25% off!
 $22.49  |  Steam Popular Deals
 
-Fight, farm, build, and work alongside mysterious creatures called "Pals" in this completely new multiplayer, open-world survival and crafting game!
+Fight, farm, build, and work alongside mysterious creatures called "Pals" in this completely new multiplayer, open-world survival game!
 
 https://store.steampowered.com/app/1623730/Palworld/
 #SteamDeals #Gaming #Deals #Palworld
 ```
 
-### Features:
-- **Game name with discount percentage**
-- **Current price and source information**
-- **Full game description from Steam**
-- **Direct Steam store link**
-- **Relevant hashtags including game name**
+### Tweet length limit
+
+| Setting | Value |
+|--------|--------|
+| Constant | `TWEET_MAX_LENGTH` in `steam_deals.py` |
+| Default | **232 characters** per tweet |
+
+`format_deal_tweet()` trims long descriptions (and shortens the title or hashtag if needed) so every tweet stays at or under the limit. The manual poster prints `Tweet (187/232 characters)` so you can see usage before copying.
+
+𝕏 allows up to **280** characters per post; this project uses **232** by default to leave room for edits or platform quirks. Change `TWEET_MAX_LENGTH` to adjust.
+
+### Tweet contents
+- Game name with discount percentage
+- Current price and deal source
+- Short description from Steam (truncated to fit the limit)
+- Direct Steam store link
+- Hashtags: `#SteamDeals #Gaming #Deals` plus a game-specific tag
 
 ## Customization
 
 To customize the bot for your needs:
 
-1. **Change the tweet format**: Modify the `format_deal_tweet()` function in `steam_deals.py`
-2. **Adjust the schedule**: Edit the cron expression in `.github/workflows/bot.yml`
-3. **Add more deal sources**: Extend the `get_all_deals()` function in `steam_deals.py`
-4. **Modify deal selection**: Change the sorting logic in `get_best_deal_tweet()`
-5. **Add filtering**: Implement price or discount percentage filters
-6. **Customize manual poster**: Edit the interface in `manual_poster.py`
-7. **Modify web interface**: Update the HTML template in `web_interface.py`
+1. **Change the tweet format**: Modify `format_deal_tweet()` in `steam_deals.py`
+2. **Change max tweet length**: Set `TWEET_MAX_LENGTH` in `steam_deals.py` (default `232`)
+3. **Adjust the schedule**: Edit the cron expression in `.github/workflows/bot.yml`
+4. **Add more deal sources**: Extend `get_all_deals()` in `steam_deals.py`
+5. **Modify deal selection**: Change the sorting logic in `get_best_deal_tweet()`
+6. **Add filtering**: Implement price or discount percentage filters
+7. **Customize manual poster**: Edit `BANNER` or prompts in `manual_poster.py`
+8. **Modify web interface**: Update the HTML template in `web_interface.py`
 
 ## Troubleshooting
 
@@ -253,24 +263,31 @@ To customize the bot for your needs:
    - The bot will fall back to showing example deals
    - Check the deal detection logic in `steam_deals.py`
 
+5. **Tweet looks cut off**
+   - Tweets are limited to `TWEET_MAX_LENGTH` (232 by default)
+   - Increase the constant in `steam_deals.py` if you need longer posts (𝕏 max is 280)
+
+6. **© symbol shows as a box in the manual poster banner**
+   - Use Windows Terminal or run `chcp 65001` before `python manual_poster.py` for UTF-8 output
+
 ## Current Status
 
-### ✅ Working Features:
+### Working features
 - **Deal Detection**: Finds 11+ real Steam deals with USD prices
-- **Tweet Formatting**: Creates professional, engaging tweets
+- **Tweet Formatting**: 232-character cap with smart truncation
 - **Steam API Integration**: Uses official Steam API for reliable data
-- **Manual Posting**: Interactive tools for copy-paste posting
+- **Manual Posting**: ASCII banner CLI, clipboard copy, `current/232` length display
 - **Desktop Shortcut**: Easy one-click access on Windows
 - **Web Interface**: Beautiful web UI for deal browsing
 - **GitHub Actions**: Runs automatically every 6 hours
 - **API Connection**: Connects to Twitter successfully
 
-### ⚠️ Limitations:
+### Limitations
 - **Tweet Posting**: Requires Twitter API Basic/Pro access ($100+/month)
 - **Free Tier**: Can only verify credentials, not post tweets
 - **Manual Required**: Free users must copy-paste tweets manually
 
-### 🚀 Next Steps:
+### Next steps
 1. **Upgrade Twitter API**: Get Basic or Pro access to enable automated posting
 2. **Add More Sources**: Integrate other game stores (Epic, GOG, etc.)
 3. **Image Support**: Add game screenshots to tweets
@@ -295,5 +312,5 @@ If you encounter any issues or have questions, please open an issue on GitHub.
 
 ---
 
-**Happy tweeting! 🐦✨**
+**Happy tweeting!**
 

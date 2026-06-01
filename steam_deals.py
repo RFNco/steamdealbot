@@ -6,6 +6,9 @@ from bs4 import BeautifulSoup
 import re
 import urllib.parse
 
+TWEET_MAX_LENGTH = 232
+
+
 class SteamDealDetector:
     """Steam deal detector using multiple methods including API calls."""
     
@@ -336,7 +339,7 @@ class SteamDealDetector:
     
     def get_all_deals(self):
         """Get all available deals from different sources."""
-        print("🔍 Searching for Steam deals...")
+        print("Searching for Steam deals...")
         
         all_deals = []
         
@@ -351,7 +354,7 @@ class SteamDealDetector:
         
         # If no real deals found, use fallback
         if not all_deals:
-            print("⚠️ No real deals found, using fallback examples...")
+            print("No real deals found, using fallback examples...")
             all_deals = self.get_fallback_deals()
         
         # Remove duplicates based on game name
@@ -363,25 +366,75 @@ class SteamDealDetector:
                 unique_deals.append(deal)
                 seen_names.add(deal['name'].lower())
         
-        print(f"✅ Found {len(unique_deals)} unique deals")
+        print(f"Found {len(unique_deals)} unique deals")
         return unique_deals
-    
-    def format_deal_tweet(self, deal):
-        """Format a single deal into a tweet."""
-        tweet = f"🏷️{deal['name']} {deal['discount']} off!\n"
-        tweet += f"{deal['price']}  |  {deal['source']}\n\n"
-        tweet += f"{deal['description']}\n\n"
-        tweet += f"{deal['steam_url']}\n"
-        tweet += f"#SteamDeals #Gaming #Deals #{deal['name'].replace(' ', '').replace('-', '').replace(':', '')[:20]}"
-        
-        return tweet
+
+    @staticmethod
+    def _game_hashtag(game_name: str, max_len: int = 20) -> str:
+        tag = re.sub(r'\W', '', game_name.replace(' ', '').replace('-', '').replace(':', ''))
+        return (tag[:max_len] if tag else 'Steam')
+
+    @staticmethod
+    def _truncate_words(text: str, max_len: int) -> str:
+        if len(text) <= max_len:
+            return text
+        if max_len <= 3:
+            return text[:max_len]
+        cut = text[: max_len - 3].rstrip()
+        if ' ' in cut:
+            cut = cut.rsplit(' ', 1)[0]
+        return cut.rstrip() + '...'
+
+    def _fit_to_max_length(self, text: str, max_len: int = TWEET_MAX_LENGTH) -> str:
+        if len(text) <= max_len:
+            return text
+        return self._truncate_words(text, max_len)
+
+    def format_deal_tweet(self, deal, max_length: int = TWEET_MAX_LENGTH) -> str:
+        """Format a single deal into a tweet (max 232 characters by default)."""
+        name = deal['name']
+        discount = deal['discount']
+        price = deal['price']
+        source = deal['source']
+        description = deal.get('description', '')
+        steam_url = deal['steam_url']
+        game_tag = self._game_hashtag(name)
+        hashtags = f"#SteamDeals #Gaming #Deals #{game_tag}"
+
+        def assemble(display_name: str, desc: str, tag: str) -> str:
+            tags = f"#SteamDeals #Gaming #Deals #{tag}"
+            head = f"🏷️{display_name} {discount} off!\n{price}  |  {source}\n\n"
+            tail = f"{steam_url}\n{tags}"
+            room = max_length - len(head) - len(tail) - 2
+            if room > 0 and desc:
+                desc = self._truncate_words(desc, room)
+                return f"{head}{desc}\n\n{tail}"
+            return f"{head}{tail}"
+
+        display_name = name
+        tweet = assemble(display_name, description, game_tag)
+
+        while len(tweet) > max_length and len(display_name) > 12:
+            display_name = self._truncate_words(display_name, len(display_name) - 4)
+            tweet = assemble(display_name, description, game_tag)
+
+        if len(tweet) > max_length:
+            for tag_len in (12, 8, 4):
+                short_tag = self._game_hashtag(name, tag_len)
+                tweet = assemble(display_name, description, short_tag)
+                if len(tweet) <= max_length:
+                    break
+
+        return self._fit_to_max_length(tweet, max_length)
     
     def get_best_deal_tweet(self):
         """Get the best deal formatted for tweeting."""
         deals = self.get_all_deals()
         
         if not deals:
-            return "🎮 No Steam deals found right now. Check back later! #SteamDeals #Gaming"
+            return self._fit_to_max_length(
+                "🎮 No Steam deals found right now. Check back later! #SteamDeals #Gaming"
+            )
         
         # Sort deals by discount percentage (highest first)
         def extract_discount_percent(deal):
@@ -403,7 +456,9 @@ class SteamDealDetector:
         deals = self.get_all_deals()
         
         if not deals:
-            return "🎮 No Steam deals found right now. Check back later! #SteamDeals #Gaming"
+            return self._fit_to_max_length(
+                "🎮 No Steam deals found right now. Check back later! #SteamDeals #Gaming"
+            )
         
         # Sort deals by discount percentage
         def extract_discount_percent(deal):
@@ -418,18 +473,34 @@ class SteamDealDetector:
         deals.sort(key=extract_discount_percent, reverse=True)
         top_deals = deals[:max_deals]
         
-        tweet = "🎮 Top Steam Deals:\n\n"
-        
-        for i, deal in enumerate(top_deals, 1):
-            game_name = deal['name']
-            if len(game_name) > 30:
-                game_name = game_name[:27] + "..."
-            
-            tweet += f"{i}. {game_name} - {deal['price']} ({deal['discount']})\n"
-        
-        tweet += "\n#SteamDeals #Gaming #Deals"
-        
-        return tweet
+        intro = "🎮 Top Steam Deals:\n\n"
+        outro = "\n#SteamDeals #Gaming #Deals"
+        budget = TWEET_MAX_LENGTH - len(intro) - len(outro)
+
+        deals_to_show = list(top_deals)
+        name_limit = 40
+
+        while True:
+            lines = []
+            for i, deal in enumerate(deals_to_show, 1):
+                game_name = deal['name']
+                if len(game_name) > name_limit:
+                    game_name = game_name[: name_limit - 3] + '...'
+                lines.append(f"{i}. {game_name} - {deal['price']} ({deal['discount']})\n")
+            body = ''.join(lines)
+            if len(body) <= budget:
+                break
+            if name_limit > 12:
+                name_limit -= 6
+            elif len(deals_to_show) > 1:
+                deals_to_show = deals_to_show[:-1]
+                name_limit = 40
+            else:
+                body = self._truncate_words(body, budget)
+                break
+
+        tweet = intro + body + outro
+        return self._fit_to_max_length(tweet)
 
 def main():
     """Test the Steam deal detector with API."""
