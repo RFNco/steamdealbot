@@ -20,6 +20,7 @@ import sys
 import os
 import shutil
 import subprocess
+from typing import Dict, List
 
 # Try to import pyperclip optionally; we provide fallbacks below
 try:
@@ -45,7 +46,8 @@ BANNER = (
     "/_____/\\____/ /_/  ©RFNco           \n"
 )
 
-SEPARATOR = "=" * 50
+SEPARATOR = "=" * 45
+BULK_COPY_COUNT = 5
 
 def print_banner() -> None:
     print(BANNER)
@@ -101,6 +103,15 @@ def copy_to_clipboard(text: str) -> bool:
 
     return False
 
+
+def format_bulk_tweets(detector: SteamDealDetector, deals: List[Dict]) -> str:
+    """Format multiple deal tweets as one clipboard-friendly batch."""
+    tweets = []
+    for deal in deals:
+        tweets.append(detector.format_deal_tweet(deal))
+
+    return ("\n\n" + "-" * 30 + "\n\n").join(tweets)
+
 def main():
     print_banner()
 
@@ -117,8 +128,14 @@ def main():
         print(f"Found {len(deals)} deals!")
         print("\n" + "=" * 50)
         
-        for i, deal in enumerate(deals, 1):
-            print(f"\nDeal #{i}: {deal['name']}")
+        deal_index = 0
+        refresh_requested = False
+
+        while deal_index < len(deals):
+            deal = deals[deal_index]
+            deal_number = deal_index + 1
+
+            print(f"\nDeal #{deal_number}: {deal['name']}")
             print(f"Price: {deal['price']} ({deal['discount']})")
             print(f"Source: {deal['source']}")
             
@@ -134,9 +151,10 @@ def main():
             choice = input("\nWhat would you like to do?\n"
                           "1. Copy this tweet to clipboard\n"
                           "2. Show next deal\n"
-                          "3. Refresh all deals\n"
-                          "4. Exit\n"
-                          "Choice (1-4): ").strip()
+                          f"3. Copy next {BULK_COPY_COUNT} deals to clipboard\n"
+                          "4. Refresh all deals\n"
+                          "5. Exit\n"
+                          "Choice (1-5): ").strip()
             
             if choice == '1':
                 if copy_to_clipboard(tweet):
@@ -150,20 +168,43 @@ def main():
                     print("Please manually copy the tweet above if needed.")
                 
                 input("\nPress Enter to continue...")
+                deal_index += 1
                 
             elif choice == '2':
+                deal_index += 1
                 continue
                 
             elif choice == '3':
+                bulk_deals = deals[deal_index:deal_index + BULK_COPY_COUNT]
+                bulk_tweets = format_bulk_tweets(detector, bulk_deals)
+
+                if copy_to_clipboard(bulk_tweets):
+                    print(f"{len(bulk_deals)} deal tweets copied to clipboard! You can now paste them on 𝕏.")
+                else:
+                    print("Could not copy the deal tweets to clipboard automatically.")
+                    if not _HAS_PYPERCLIP:
+                        print("Tip: Install pyperclip with: pip install pyperclip")
+                    print("Please manually copy the deal tweets below if needed.")
+                    print(bulk_tweets)
+
+                input("\nPress Enter to continue...")
+                deal_index += len(bulk_deals)
+
+            elif choice == '4':
+                refresh_requested = True
                 break
                 
-            elif choice == '4':
+            elif choice == '5':
                 print("Goodbye!")
                 return
                 
             else:
                 print("Invalid choice. Please try again.")
+                continue
         
+        if refresh_requested:
+            continue
+
         # Ask if user wants to refresh
         if len(deals) > 0:
             refresh = input("\nRefresh deals? (y/n): ").strip().lower()

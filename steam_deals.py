@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import re
 import urllib.parse
 
-TWEET_MAX_LENGTH = 232
+TWEET_MAX_LENGTH = 280
 
 # Steam's "infinite scroll" search results endpoint returns clean JSON and
 # supports pagination, which lets us sample a different slice of specials on
@@ -665,21 +665,36 @@ class SteamDealDetector:
             return text
         return self._truncate_words(text, max_len)
 
+    @staticmethod
+    def _strikethrough(text: str) -> str:
+        return ''.join(char + '\u0336' for char in text)
+
+    @staticmethod
+    def _trim_steam_url(url: str) -> str:
+        app_match = re.search(r'store\.steampowered\.com/app/(\d+)', url)
+        if app_match:
+            return f"https://store.steampowered.com/app/{app_match.group(1)}/"
+        return url
+
     def format_deal_tweet(self, deal, max_length: int = TWEET_MAX_LENGTH) -> str:
-        """Format a single deal into a tweet (max 232 characters by default)."""
+        """Format a single deal into a tweet (max 280 characters by default)."""
         name = deal['name']
         discount = deal['discount']
         price = deal['price']
+        original_price = deal.get('original_price')
         source = deal['source']
         description = deal.get('description', '')
-        steam_url = deal['steam_url']
+        steam_url = self._trim_steam_url(deal['steam_url'])
         extra_hashtags = self._relevant_hashtags(deal)
+        price_line = price
+        if original_price and original_price != price:
+            price_line = f"{self._strikethrough(original_price)} {price}"
 
         def assemble(display_name: str, desc: str, extras) -> str:
             tags = "#SteamDeals #Gaming #Deals"
             if extras:
                 tags += " " + " ".join(extras)
-            head = f"🏷️{display_name} {discount} off!\n{price}  |  {source}\n\n"
+            head = f"🏷️{display_name} {discount} off!\n{price_line} | {source}\n\n"
             tail = f"{steam_url}\n{tags}"
             room = max_length - len(head) - len(tail) - 2
             if room > 0 and desc:
