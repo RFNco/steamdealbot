@@ -20,7 +20,7 @@ All notable changes to SteamDealBot will be documented in this file.
 
 ### Changed
 
-- Updated README documentation for v2.1.1 manual poster, tweet formatting, themed ideas, and changelog workflow.
+- Updated README documentation for v2.1.1 manual poster, tweet formatting, themed ideas, and changelog workflow..
 - Shifted refresh and exit menu options down to keep the original single-tweet copy option unchanged.
 - Tightened tweet price/source separator spacing from two spaces around `|` to one space.
 - Increased the tweet length limit from 232 to 280 characters to allow longer descriptions.
