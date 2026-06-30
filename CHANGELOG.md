@@ -6,6 +6,23 @@ All notable changes to SteamDealBot will be documented in this file.
 
 - Add future changes here before tagging a new version.
 
+## [2.1.2] - 2026-06-30
+
+### Added
+
+- Added `ROADMAP.md` for future improvement ideas and checklist tracking.
+- Added a terminal-palette ANSI color theme for manual poster headings, separators, labels, values, menus, statuses, and tweet previews.
+- Added manual poster keyword search for discounted Steam games, with one-result copy support.
+
+### Changed
+
+- Changed themed tweet ideas to copy one selected idea instead of copying all 5 ideas at once.
+- Changed keyword search results to show a compact numbered title/discount list before copying the selected full tweet.
+- Show the selected keyword search tweet preview after copying it.
+- Rebalanced Steam deal sampling toward reviewed/popular games while keeping a smaller discovery sample for lesser-known indies.
+- Preserved numbered game titles such as `Baldur's Gate 3` when cleaning Steam result names.
+- Updated README documentation for v2.1.2 manual poster colors, selected idea copying, balanced deal sampling, and keyword search.
+
 ## [2.1.1] - 2026-06-25
 
 ### Added

@@ -5,10 +5,11 @@ A Twitter (𝕏) bot that automatically finds and posts Steam game deals with de
 ## Features
 
 - **Real Steam Deal Detection**: Pulls live discounts from Steam's specials catalog
-- **Varied Deals Every Refresh**: Samples a random slice of Steam's thousands of specials, so refreshes don't repeat the same handful of games
+- **Balanced Deals Every Refresh**: Favors reviewed/popular discounted games while keeping some discovery space for lesser-known indies
 - **Dynamic Source Label**: Shows the active seasonal sale name (e.g. "Steam Summer Sale") when one is running, otherwise "Steam Specials"
 - **Relevant Game Hashtags**: Adds genre/tag hashtags (e.g. `#OpenWorld #RPG`) per game for better reach
 - **Rich Tweet Format**: Posts engaging tweets with game descriptions and Steam store links
+- **Keyword Deal Search**: Search discounted Steam games by keyword and copy a matching tweet
 - **Automated Posting**: Runs every 6 hours via GitHub Actions
 - **Smart Deal Selection**: Finds the best deals with highest discount percentages
 - **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
@@ -109,9 +110,10 @@ On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster** header
 - Copy one tweet or bulk copy the next 5 deal tweets for faster posting
 - Bulk copy automatically skips copied deals so they do not show again as uncopied deals
 - Generate 5 themed tweet ideas for Steam, Nintendo, or general gaming
+- Search discounted Steam games by keyword, then copy one matching tweet
 - Steam and general gaming ideas can use current Steam deal data; Nintendo ideas stay template-only for now
 - Character count per tweet shown as `242/280` (see [Tweet length limit](#tweet-length-limit))
-- Menu: copy tweet, next deal, bulk copy, generate ideas, refresh deals/idea sources, or exit
+- Menu: copy tweet, next deal, bulk copy, generate ideas, refresh deals/idea sources, search by keyword, or exit
 - Clipboard fallbacks: pyperclip, Termux, macOS `pbcopy`, Windows `clip`
 
 ### Method 2: Desktop Shortcut (Windows)
@@ -188,13 +190,14 @@ steamdealbot/
 ├── web_interface.py             # Web interface for manual posting
 ├── SteamDealBot.bat             # Desktop shortcut for Windows
 ├── CHANGELOG.md                 # Versioned change history
+├── ROADMAP.md                   # Future improvement checklist
 ├── requirements.txt             # Python dependencies
 └── README.md                   # This file
 ```
 
 ## How It Works
 
-1. **Deal Detection (varied)**: Uses Steam's paginated search-results JSON endpoint (`store.steampowered.com/search/results/?infinite=1&json=1`) with a **random start offset** and rotating sort order on each refresh. With thousands of specials available, every run samples a different slice instead of the same curated ~10. The legacy featured API and HTML scrapers remain as fallbacks.
+1. **Deal Detection (balanced)**: Uses Steam's paginated search-results JSON endpoint (`store.steampowered.com/search/results/?infinite=1&json=1`) with a blend of top reviewed/relevant sale pages plus a capped discovery sample. This keeps recognizable games and well-reviewed indies near the front without removing lesser-known discoveries entirely. The legacy featured API and HTML scrapers remain as fallbacks.
 2. **Sale Detection**: Checks the Steam homepage once per run for an active seasonal sale (Summer, Winter, etc.) and uses its name as the deal `source`; falls back to "Steam Specials".
 3. **Data Processing**: Extracts game names, USD prices, discount percentages, Steam store URLs, and the game's top user tags (used for hashtags). Descriptions are fetched for the first few deals (the rest get a generated line) to keep refreshes fast.
 4. **Tweet Formatting**: Builds each tweet (max **280 characters**), keeping title, original/sale price, clean Steam app link, and hashtags; shortens the description when needed (see [Tweet Format](#tweet-format)).
@@ -248,6 +251,16 @@ The manual poster can also generate 5 non-AI tweet ideas:
 
 Use **Refresh deals and idea sources** to fetch a fresh deal set before generating more ideas.
 
+### Keyword deal search
+
+The manual poster can search discounted Steam games directly by keyword:
+
+```text
+Search discounted Steam games by keyword: Baldur
+```
+
+The search uses Steam's specials endpoint with the keyword and only returns discounted matches. Results are shown as a compact numbered list with game title and discount percentage; choosing a number copies the full formatted tweet for that game.
+
 ## Customization
 
 To customize the bot for your needs:
@@ -255,7 +268,7 @@ To customize the bot for your needs:
 1. **Change the tweet format**: Modify `format_deal_tweet()` in `steam_deals.py`
 2. **Change max tweet length**: Set `TWEET_MAX_LENGTH` in `steam_deals.py` (default `280`)
 3. **Change number of genre hashtags**: Set `RELEVANT_HASHTAG_COUNT` (default `2`); skip noisy tags via `GENERIC_TAGS`
-4. **Tune deal variety**: Adjust `sample_size` in `get_all_deals()` and the `SEARCH_SORT_ORDERS` list
+4. **Tune deal variety**: Adjust `POPULAR_SEARCH_PAGES`, `DISCOVERY_SEARCH_SORTS`, `DISCOVERY_OFFSET_LIMIT`, or `sample_size` in `steam_deals.py`
 5. **Tune sale detection**: Edit `SEASONAL_SALE_PATTERN` / `DEFAULT_SOURCE_LABEL`
 6. **Limit description fetches**: Set `DESCRIPTION_ENRICH_LIMIT` (more = richer but slower refresh)
 7. **Adjust the schedule**: Edit the cron expression in `.github/workflows/bot.yml`
@@ -287,7 +300,7 @@ To customize the bot for your needs:
    - Check the deal detection logic in `steam_deals.py`
 
 5. **Same games repeating on refresh**
-   - Deals are now sampled from a random offset across thousands of specials, so repeats should be rare
+   - Deals are now blended from popular/reviewed pages plus a capped discovery sample, so some high-signal games may appear more often by design
    - If you still see repeats, the paginated endpoint may have failed and the code fell back to the curated featured list — check the console for fetch errors
 
 6. **Missing descriptions or genre hashtags**
@@ -304,12 +317,13 @@ To customize the bot for your needs:
 ## Current Status
 
 ### Working features
-- **Varied Deal Detection**: Random-offset sampling across thousands of Steam specials
+- **Balanced Deal Detection**: Review/relevance-weighted sampling with a smaller discovery slice
 - **Dynamic Source Label**: Seasonal sale name when active, else "Steam Specials"
 - **Genre Hashtags**: Up to 2 relevant game tags per tweet for reach
 - **Tweet Formatting**: 280-character cap, strikethrough original prices, clean Steam app URLs, and smart truncation
 - **Manual Posting**: ASCII banner CLI, single/bulk clipboard copy, auto-skip after bulk copy, `current/280` length display
 - **Tweet Ideas**: 5 themed non-AI ideas using templates plus current deal data for Steam/general gaming
+- **Keyword Search**: Search current discounted Steam games by keyword and copy one matching tweet
 - **Desktop Shortcut**: Easy one-click access on Windows
 - **Web Interface**: Web UI for deal browsing
 - **GitHub Actions**: Runs automatically every 6 hours

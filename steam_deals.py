@@ -6,8 +6,19 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import re
 import urllib.parse
+import os
 
 TWEET_MAX_LENGTH = 280
+STEAMDEALBOT_COLOR_ENABLED = os.environ.get("STEAMDEALBOT_NO_COLOR") != "1"
+MUTED_COLOR = "\033[90m"
+RESET_COLOR = "\033[0m"
+
+
+def print_progress(message):
+    if STEAMDEALBOT_COLOR_ENABLED:
+        print(f"{MUTED_COLOR}{message}{RESET_COLOR}")
+    else:
+        print(message)
 
 # Steam's "infinite scroll" search results endpoint returns clean JSON and
 # supports pagination, which lets us sample a different slice of specials on
@@ -15,8 +26,18 @@ TWEET_MAX_LENGTH = 280
 STEAM_SEARCH_RESULTS_URL = "https://store.steampowered.com/search/results/"
 # How many descriptions to enrich per refresh (each one is an extra page load).
 DESCRIPTION_ENRICH_LIMIT = 12
-# Rotate sort orders for extra variety between refreshes.
-SEARCH_SORT_ORDERS = ["", "Reviews_DESC", "Released_DESC", "_ASC", "_DESC"]
+# Keep most manual-poster results near Steam's high-signal pages so the feed
+# includes recognizable games and well-reviewed/viral indies, not only deep
+# catalog items with little public traction.
+POPULAR_SEARCH_PAGES = [
+    ("Reviews_DESC", 0),
+    ("Reviews_DESC", 50),
+    ("Reviews_DESC", 100),
+    ("", 0),
+    ("", 50),
+]
+DISCOVERY_SEARCH_SORTS = ["Reviews_DESC", "", "Released_DESC"]
+DISCOVERY_OFFSET_LIMIT = 1000
 
 # Default source label when no seasonal Steam-wide sale is detected.
 DEFAULT_SOURCE_LABEL = "Steam Specials"
@@ -373,7 +394,7 @@ class SteamDealDetector:
                     phrase = re.sub(r'\s+', ' ', phrase).title()
                     label = phrase if phrase.lower().startswith('steam') else f"Steam {phrase}"
                     self._active_sale_name = label
-                    print(f"Active sale detected: {label}")
+                    print_progress(f"Active sale detected: {label}")
                     break
         except Exception as e:
             print(f"Could not check for active sale: {e}")
@@ -414,14 +435,14 @@ class SteamDealDetector:
                 break
         return hashtags
 
-    def _fetch_search_results_json(self, start=0, count=50, sort_by=""):
+    def _fetch_search_results_json(self, start=0, count=50, sort_by="", query=""):
         """Call Steam's paginated search-results JSON endpoint.
 
         Returns the parsed JSON dict (with 'total_count' and 'results_html'),
         or None on failure.
         """
         params = {
-            'query': '',
+            'term': query,
             'start': start,
             'count': count,
             'specials': 1,
@@ -503,26 +524,96 @@ class SteamDealDetector:
 
         return deals
 
-    def get_random_specials(self, count=50):
-        """Get a randomly-offset page of specials for variety on each refresh."""
-        total = self.get_total_specials_count()
-
-        sort_by = random.choice(SEARCH_SORT_ORDERS)
-
-        if total and total > count:
-            max_start = max(0, total - count)
-            start = random.randint(0, max_start)
-        else:
-            start = 0
-
+    def _get_specials_page(self, start=0, count=50, sort_by=""):
         data = self._fetch_search_results_json(start=start, count=count, sort_by=sort_by)
         if not data or not data.get('results_html'):
             return []
 
         source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
-        deals = self._parse_search_results_html(data['results_html'], source_label=source_label)
-        print(f"Sampled {len(deals)} specials (offset {start}, sort '{sort_by or 'default'}')")
-        return deals
+        return self._parse_search_results_html(data['results_html'], source_label=source_label)
+
+    def search_discounted_games(self, keyword, count=10):
+        """Search Steam specials for discounted games matching a keyword."""
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return []
+
+        all_deals = []
+        for sort_by in ("Reviews_DESC", ""):
+            data = self._fetch_search_results_json(
+                start=0,
+                count=count,
+                sort_by=sort_by,
+                query=keyword,
+            )
+            if not data or not data.get('results_html'):
+                continue
+
+            source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
+            all_deals.extend(
+                self._parse_search_results_html(data['results_html'], source_label=source_label)
+            )
+
+        unique_deals = []
+        seen_names = set()
+        for deal in all_deals:
+            key = deal['name'].lower()
+            if key in seen_names:
+                continue
+            unique_deals.append(deal)
+            seen_names.add(key)
+
+        keyword_lower = keyword.lower()
+        unique_deals.sort(
+            key=lambda deal: (
+                0 if deal['name'].lower().startswith(keyword_lower) else 1,
+                0 if keyword_lower in deal['name'].lower() else 1,
+                deal['name'].lower(),
+            )
+        )
+        self._enrich_descriptions(unique_deals, limit=min(count, DESCRIPTION_ENRICH_LIMIT))
+        print_progress(f"Found {len(unique_deals)} discounted search results for \"{keyword}\"")
+        return unique_deals[:count]
+
+    def get_random_specials(self, count=50):
+        """Get a balanced set of specials favoring reviewed/popular games.
+
+        Most samples come from Steam's top review/relevance pages. A smaller
+        discovery page still keeps room for under-the-radar games.
+        """
+        total = self.get_total_specials_count()
+        page_count = max(20, count // 2)
+        all_deals = []
+        sampled_pages = []
+
+        popular_pages = random.sample(POPULAR_SEARCH_PAGES, k=min(3, len(POPULAR_SEARCH_PAGES)))
+        for sort_by, start in popular_pages:
+            deals = self._get_specials_page(start=start, count=page_count, sort_by=sort_by)
+            all_deals.extend(deals)
+            sampled_pages.append(f"{sort_by or 'default'}@{start}:{len(deals)}")
+
+        sort_by = random.choice(DISCOVERY_SEARCH_SORTS)
+        if total and total > page_count:
+            max_start = min(max(0, total - page_count), DISCOVERY_OFFSET_LIMIT)
+            start = random.randint(0, max_start)
+        else:
+            start = 0
+        deals = self._get_specials_page(start=start, count=page_count, sort_by=sort_by)
+        all_deals.extend(deals)
+        sampled_pages.append(f"{sort_by or 'default'}@{start}:{len(deals)}")
+
+        # Dedupe while preserving the blended popular/discovery order.
+        unique_deals = []
+        seen_names = set()
+        for deal in all_deals:
+            key = deal['name'].lower()
+            if key in seen_names:
+                continue
+            unique_deals.append(deal)
+            seen_names.add(key)
+
+        print_progress(f"Sampled {len(unique_deals)} specials ({', '.join(sampled_pages)})")
+        return unique_deals[:count]
 
     def _generated_description(self, deal):
         return (
@@ -605,7 +696,6 @@ class SteamDealDetector:
         game_name = re.sub(r'\s*\d{1,2}\s+\w{3,9},?\s+\d{4}.*$', '', game_name)
         game_name = re.sub(r'\s*-\d+%.*$', '', game_name)
         game_name = re.sub(r'\s*Rp\s*\d+.*$', '', game_name)
-        game_name = re.sub(r'\s*\d+.*$', '', game_name)
         game_name = game_name.strip()
         return game_name
     
@@ -617,19 +707,19 @@ class SteamDealDetector:
         available specials. The curated featured API and the legacy scrapers
         are used only as fallbacks if the JSON endpoint returns nothing.
         """
-        print("Searching for Steam deals...")
+        print_progress("Searching for Steam deals...")
 
         all_deals = list(self.get_random_specials(count=sample_size))
 
         # Fallback chain if the paginated endpoint returned nothing.
         if not all_deals:
-            print("Paginated search returned nothing, trying other sources...")
+            print_progress("Paginated search returned nothing, trying other sources...")
             all_deals.extend(self.get_steam_api_deals())
             all_deals.extend(self.get_steam_specials_page())
             all_deals.extend(self.get_steam_search_deals())
 
         if not all_deals:
-            print("No real deals found, using fallback examples...")
+            print_progress("No real deals found, using fallback examples...")
             all_deals = self.get_fallback_deals()
 
         # Remove duplicates based on game name.
@@ -640,13 +730,18 @@ class SteamDealDetector:
                 unique_deals.append(deal)
                 seen_names.add(deal['name'].lower())
 
-        # Shuffle so the displayed order also varies between refreshes.
-        random.shuffle(unique_deals)
+        # Keep the higher-signal popular/reviewed pages near the front, but
+        # shuffle enough to avoid showing the exact same order every refresh.
+        high_signal_deals = unique_deals[:30]
+        discovery_deals = unique_deals[30:]
+        random.shuffle(high_signal_deals)
+        random.shuffle(discovery_deals)
+        unique_deals = high_signal_deals + discovery_deals
 
         # Fill in descriptions (real for the first few, generated for the rest).
         self._enrich_descriptions(unique_deals)
 
-        print(f"Found {len(unique_deals)} unique deals")
+        print_progress(f"Found {len(unique_deals)} unique deals")
         return unique_deals
 
     @staticmethod

@@ -51,6 +51,21 @@ SEPARATOR = "=" * 45
 BULK_COPY_COUNT = 5
 TWEET_IDEA_COUNT = 5
 TWEET_IDEA_SEPARATOR = "\n\n" + "-" * 30 + "\n\n"
+COLOR_ENABLED = os.environ.get("STEAMDEALBOT_NO_COLOR") != "1"
+THEME = {
+    # Standard ANSI colors use the user's terminal palette, so they match
+    # TerminalColors-style themes better than raw truecolor hex on limited shells.
+    "banner": "\033[93m",
+    "title": "\033[96m",
+    "label": "\033[93m",
+    "value": "\033[97m",
+    "muted": "\033[90m",
+    "tweet": "\033[93m",
+    "success": "\033[92m",
+    "warning": "\033[33m",
+    "error": "\033[91m",
+    "reset": "\033[0m",
+}
 
 TWEET_IDEA_THEMES = {
     "1": (
@@ -157,12 +172,85 @@ TWEET_IDEA_THEME_EXTRAS = {
 for theme_key, extra_templates in TWEET_IDEA_THEME_EXTRAS.items():
     TWEET_IDEA_THEMES[theme_key][1].extend(extra_templates)
 
+
+def color_text(text: str, style: str) -> str:
+    if not COLOR_ENABLED:
+        return text
+    return f"{THEME[style]}{text}{THEME['reset']}"
+
+
+def themed_print(text: str, style: str = "value") -> None:
+    print(color_text(text, style))
+
+
+def themed_input(prompt: str, style: str = "label") -> str:
+    return input(color_text(prompt, style))
+
+
+def print_separator(length: int = 45) -> None:
+    themed_print("=" * length, "muted")
+
+
+def print_label_value(label: str, value: str) -> None:
+    print(color_text(f"{label}: ", "label") + color_text(value, "value"))
+
+
+def print_muted_label_value(label: str, value: str) -> None:
+    print(color_text(f"{label}: {value}", "muted"))
+
+
+def format_menu_option(number: int, text: str) -> str:
+    option_style = {
+        1: "tweet",
+        2: "title",
+    }.get(number, "value")
+    return color_text(f"{number}. ", "muted") + color_text(text, option_style)
+
 def print_banner() -> None:
-    print(BANNER)
+    signature = "©RFNco"
+    for line in BANNER.splitlines():
+        if signature in line:
+            before, after = line.split(signature, 1)
+            print(
+                color_text(before, "banner")
+                + color_text(signature, "title")
+                + color_text(after, "banner")
+            )
+        else:
+            themed_print(line, "banner")
     print()
-    print(SEPARATOR)
-    print("Manual Poster")
-    print(SEPARATOR)
+    print_separator(len(SEPARATOR))
+    themed_print("Manual Poster", "title")
+    print_separator(len(SEPARATOR))
+
+
+def print_tweet_preview(tweet: str) -> None:
+    lines = tweet.splitlines()
+    for index, line in enumerate(lines):
+        if not line:
+            print()
+        elif index == 0:
+            themed_print(line, "tweet")
+        elif index == 1:
+            themed_print(line, "value")
+        elif line.startswith("http://") or line.startswith("https://"):
+            themed_print(line, "value")
+        elif line.startswith("#"):
+            themed_print(line, "value")
+        else:
+            themed_print(line, "value")
+
+
+def print_tweet_idea(index: int, idea: str) -> None:
+    print(
+        color_text(f"\nIdea #{index}: ", "title")
+        + color_text(f"{len(idea)}/{TWEET_MAX_LENGTH} characters", "muted")
+    )
+    for line in idea.splitlines():
+        if line:
+            themed_print(line, "value")
+        else:
+            print()
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -229,6 +317,23 @@ def fit_tweet_text(text: str) -> str:
     if " " in trimmed:
         trimmed = trimmed.rsplit(" ", 1)[0]
     return trimmed.rstrip() + "..."
+
+
+def format_tweet_idea_spacing(idea: str) -> str:
+    lines = idea.splitlines()
+    formatted_lines = []
+
+    for line in lines:
+        is_link = line.startswith("http://") or line.startswith("https://")
+        is_hashtag = line.startswith("#")
+        previous_line = formatted_lines[-1] if formatted_lines else ""
+        previous_is_link = previous_line.startswith("http://") or previous_line.startswith("https://")
+        needs_spacing = (is_hashtag and not previous_is_link) or (is_link and not previous_is_link)
+        if needs_spacing and previous_line != "":
+            formatted_lines.append("")
+        formatted_lines.append(line)
+
+    return "\n".join(formatted_lines)
 
 
 def get_deal_value(deal: Dict, key: str, fallback: str = "") -> str:
@@ -308,39 +413,103 @@ def generate_tweet_ideas(theme_choice: str, deals: List[Dict]) -> List[str]:
     fallback_ideas = random.sample(templates, min(TWEET_IDEA_COUNT, len(templates)))
     ideas.extend(fallback_ideas)
     random.shuffle(ideas)
-    return [fit_tweet_text(idea) for idea in ideas[:TWEET_IDEA_COUNT]]
+    return [
+        fit_tweet_text(format_tweet_idea_spacing(idea))
+        for idea in ideas[:TWEET_IDEA_COUNT]
+    ]
 
 
 def show_tweet_ideas_menu(deals: List[Dict]) -> None:
-    print("\nChoose a tweet idea theme:")
+    themed_print("\nChoose a tweet idea theme:", "value")
     for theme_key, (theme_name, _) in TWEET_IDEA_THEMES.items():
-        print(f"{theme_key}. {theme_name}")
+        print(color_text(f"{theme_key}. ", "muted") + color_text(theme_name, "value"))
 
-    theme_choice = input("Theme choice: ").strip()
+    theme_choice = themed_input("Theme choice: ").strip()
     if theme_choice not in TWEET_IDEA_THEMES:
-        print("Invalid theme choice.")
+        themed_print("Invalid theme choice.", "error")
         return
 
     theme_name, _ = TWEET_IDEA_THEMES[theme_choice]
     ideas = generate_tweet_ideas(theme_choice, deals)
 
-    print(f"\n{theme_name} tweet ideas:")
-    print("Using current Steam deal data plus reusable templates.")
-    print("-" * 30)
+    themed_print(f"\n{theme_name} tweet ideas:", "title")
+    themed_print("Using current Steam deal data plus reusable templates.", "value")
+    themed_print("-" * 30, "muted")
     for index, idea in enumerate(ideas, 1):
-        print(f"\nIdea #{index} ({len(idea)}/{TWEET_MAX_LENGTH} characters):")
-        print(idea)
+        print_tweet_idea(index, idea)
 
-    copy_choice = input("\nCopy all ideas to clipboard? (y/n): ").strip().lower()
-    if copy_choice != "y":
+    copy_choice = themed_input("\nCopy which idea? (1-5, Enter=cancel): ").strip()
+    if not copy_choice:
         return
 
-    ideas_text = TWEET_IDEA_SEPARATOR.join(ideas)
-    if copy_to_clipboard(ideas_text):
-        print("Tweet ideas copied to clipboard!")
+    try:
+        idea_index = int(copy_choice)
+    except ValueError:
+        themed_print("Invalid idea number.", "error")
+        return
+
+    if idea_index < 1 or idea_index > len(ideas):
+        themed_print("Invalid idea number.", "error")
+        return
+
+    selected_idea = ideas[idea_index - 1]
+    if copy_to_clipboard(selected_idea):
+        themed_print(f"Idea #{idea_index} copied to clipboard!", "success")
     else:
-        print("Could not copy tweet ideas to clipboard automatically.")
-        print("Please manually copy the ideas above if needed.")
+        themed_print("Could not copy that tweet idea to clipboard automatically.", "error")
+        themed_print("Please manually copy the selected idea above if needed.", "warning")
+
+
+def show_keyword_search_menu(detector: SteamDealDetector) -> None:
+    keyword = themed_input("\nSearch discounted Steam games by keyword: ").strip()
+    if not keyword:
+        return
+
+    themed_print(f"Searching discounted Steam games for \"{keyword}\"...", "muted")
+    results = detector.search_discounted_games(keyword)
+    if not results:
+        themed_print(f"No discounted games found for \"{keyword}\" right now.", "warning")
+        return
+
+    themed_print(f"\nSearch results for \"{keyword}\":", "title")
+    themed_print("-" * 30, "muted")
+    for index, deal in enumerate(results, 1):
+        print(
+            color_text(f"{index}. ", "muted")
+            + color_text(deal['name'], "value")
+            + color_text(f" {deal['discount']}", "muted")
+        )
+
+    copy_choice = themed_input(
+        f"\nCopy which search result? (1-{len(results)}, Enter=cancel): "
+    ).strip()
+    if not copy_choice:
+        return
+
+    try:
+        result_index = int(copy_choice)
+    except ValueError:
+        themed_print("Invalid result number.", "error")
+        return
+
+    if result_index < 1 or result_index > len(results):
+        themed_print("Invalid result number.", "error")
+        return
+
+    selected_tweet = detector.format_deal_tweet(results[result_index - 1])
+    if copy_to_clipboard(selected_tweet):
+        themed_print(f"Search result #{result_index} copied to clipboard!", "success")
+        print()
+        themed_print("-" * 30, "muted")
+        print_tweet_preview(selected_tweet)
+        themed_print("-" * 30, "muted")
+    else:
+        themed_print("Could not copy that search result automatically.", "error")
+        themed_print("Please manually copy the selected tweet above if needed.", "warning")
+        print()
+        themed_print("-" * 30, "muted")
+        print_tweet_preview(selected_tweet)
+        themed_print("-" * 30, "muted")
 
 def main():
     print_banner()
@@ -348,15 +517,16 @@ def main():
     detector = SteamDealDetector()
     
     while True:
-        print("Fetching latest Steam deals...")
+        themed_print("Fetching latest Steam deals...", "muted")
         deals = detector.get_all_deals()
         
         if not deals:
-            print("No deals found. Try again later.")
+            themed_print("No deals found. Try again later.", "warning")
             continue
         
-        print(f"Found {len(deals)} deals!")
-        print("\n" + "=" * 50)
+        themed_print(f"Found {len(deals)} deals!", "success")
+        print()
+        print_separator(50)
         
         deal_index = 0
         refresh_requested = False
@@ -365,43 +535,54 @@ def main():
             deal = deals[deal_index]
             deal_number = deal_index + 1
 
-            print(f"\nDeal #{deal_number}: {deal['name']}")
-            print(f"Price: {deal['price']} ({deal['discount']})")
-            print(f"Source: {deal['source']}")
+            print_muted_label_value(f"\nDeal #{deal_number}", deal['name'])
             
             # Format the tweet
             tweet = detector.format_deal_tweet(deal)
             
-            print(f"\nTweet ({len(tweet)}/{TWEET_MAX_LENGTH} characters):")
-            print("-" * 30)
-            print(tweet)
-            print("-" * 30)
+            print_muted_label_value("Tweet", f"{len(tweet)}/{TWEET_MAX_LENGTH} characters")
+            print()
+            themed_print("-" * 30, "muted")
+            print_tweet_preview(tweet)
+            themed_print("-" * 30, "muted")
             
             # Ask user what to do
-            choice = input("\nWhat would you like to do?\n"
-                          "1. Copy this tweet to clipboard\n"
-                          "2. Show next deal\n"
-                          f"3. Copy next {BULK_COPY_COUNT} deals to clipboard\n"
-                          "4. Generate themed tweet ideas\n"
-                          "5. Refresh deals and idea sources\n"
-                          "6. Exit\n"
-                          "Choice (1-6): ").strip()
+            choice = input(
+                "\n"
+                + color_text("What would you like to do?", "muted")
+                + "\n"
+                + format_menu_option(1, "Copy this tweet to clipboard")
+                + "\n"
+                + format_menu_option(2, "Show next deal")
+                + "\n"
+                + format_menu_option(3, f"Copy next {BULK_COPY_COUNT} deals to clipboard")
+                + "\n"
+                + format_menu_option(4, "Generate themed tweet ideas")
+                + "\n"
+                + format_menu_option(5, "Refresh deals and idea sources")
+                + "\n"
+                + format_menu_option(6, "Search by keyword")
+                + "\n"
+                + format_menu_option(7, "Exit")
+                + "\n"
+                + color_text("Choice (1-7, Enter=next): ", "label")
+            ).strip()
             
             if choice == '1':
                 if copy_to_clipboard(tweet):
-                    print("Tweet copied to clipboard! You can now paste it on 𝕏.")
+                    themed_print("Tweet copied to clipboard! You can now paste it on 𝕏.", "success")
                 else:
-                    print("Could not copy to clipboard automatically.")
+                    themed_print("Could not copy to clipboard automatically.", "error")
                     if not _HAS_PYPERCLIP:
-                        print("Tip: Install pyperclip with: pip install pyperclip")
+                        themed_print("Tip: Install pyperclip with: pip install pyperclip", "warning")
                     if shutil.which("termux-clipboard-set"):
-                        print("You can also run: echo \"<tweet>\" | termux-clipboard-set")
-                    print("Please manually copy the tweet above if needed.")
+                        themed_print("You can also run: echo \"<tweet>\" | termux-clipboard-set", "warning")
+                    themed_print("Please manually copy the tweet above if needed.", "warning")
                 
-                input("\nPress Enter to continue...")
+                themed_input("\nPress Enter to continue...", "muted")
                 deal_index += 1
                 
-            elif choice == '2':
+            elif choice == '' or choice == '2':
                 deal_index += 1
                 continue
                 
@@ -410,20 +591,20 @@ def main():
                 bulk_tweets = format_bulk_tweets(detector, bulk_deals)
 
                 if copy_to_clipboard(bulk_tweets):
-                    print(f"{len(bulk_deals)} deal tweets copied to clipboard! You can now paste them on 𝕏.")
+                    themed_print(f"{len(bulk_deals)} deal tweets copied to clipboard! You can now paste them on 𝕏.", "success")
                 else:
-                    print("Could not copy the deal tweets to clipboard automatically.")
+                    themed_print("Could not copy the deal tweets to clipboard automatically.", "error")
                     if not _HAS_PYPERCLIP:
-                        print("Tip: Install pyperclip with: pip install pyperclip")
-                    print("Please manually copy the deal tweets below if needed.")
-                    print(bulk_tweets)
+                        themed_print("Tip: Install pyperclip with: pip install pyperclip", "warning")
+                    themed_print("Please manually copy the deal tweets below if needed.", "warning")
+                    print_tweet_preview(bulk_tweets)
 
-                input("\nPress Enter to continue...")
+                themed_input("\nPress Enter to continue...", "muted")
                 deal_index += len(bulk_deals)
 
             elif choice == '4':
                 show_tweet_ideas_menu(deals)
-                input("\nPress Enter to continue...")
+                themed_input("\nPress Enter to continue...", "muted")
                 continue
 
             elif choice == '5':
@@ -431,11 +612,16 @@ def main():
                 break
                 
             elif choice == '6':
-                print("Goodbye!")
+                show_keyword_search_menu(detector)
+                themed_input("\nPress Enter to continue...", "muted")
+                continue
+
+            elif choice == '7':
+                themed_print("Goodbye!", "success")
                 return
                 
             else:
-                print("Invalid choice. Please try again.")
+                themed_print("Invalid choice. Please try again.", "error")
                 continue
         
         if refresh_requested:
@@ -443,7 +629,7 @@ def main():
 
         # Ask if user wants to refresh
         if len(deals) > 0:
-            refresh = input("\nRefresh deals? (y/n): ").strip().lower()
+            refresh = themed_input("\nRefresh deals? (y/n): ").strip().lower()
             if refresh != 'y':
                 break
 
@@ -451,7 +637,7 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\nGoodbye!")
+        themed_print("\n\nGoodbye!", "success")
     except Exception as e:
-        print(f"\nError: {e}")
-        print("Please check your internet connection and try again.")
+        themed_print(f"\nError: {e}", "error")
+        themed_print("Please check your internet connection and try again.", "warning")
