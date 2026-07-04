@@ -1,14 +1,14 @@
 # SteamDealBot Roadmap
 
-Future ideas and improvements to consider after v2.1.2.
+Future ideas and improvements to consider after v2.1.3.
 
 ## Content Quality
 
-- [ ] Add deal modes: big names only, popular indies, hidden gems, deep discounts.
+- [x] Add deal modes: big names only, popular indies, hidden gems, deep discounts.
 - [ ] Add filters for minimum discount, maximum price, and minimum review signal.
 - [ ] Skip DLC, soundtracks, demos, and adult-only content unless explicitly enabled.
-- [ ] Add category searches such as RPG, horror, co-op, cozy, strategy, and under $5.
-- [ ] Add posted-game history so the same game does not repeat too soon.
+- [x] Add category searches such as RPG, horror, co-op, cozy, strategy, and under $5.
+- [x] Add posted-game history so the same game does not repeat too soon.
 
 ## Tweet Writing
 
@@ -19,8 +19,8 @@ Future ideas and improvements to consider after v2.1.2.
 
 ## Manual Poster Workflow
 
-- [ ] Add "mark as posted" after copying a tweet.
-- [ ] Save copied/posted tweets with date, game name, price, and URL.
+- [x] Add "mark as posted" after copying a tweet.
+- [x] Save copied/posted tweets with date, game name, price, and URL.
 - [ ] Add a daily posting mix suggestion, for example 2 popular games, 2 indie games, and 1 engagement tweet.
 - [ ] Add a queue view for prepared tweets.
 - [ ] Add export to a text file for scheduled posting.

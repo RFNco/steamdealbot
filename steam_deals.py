@@ -38,6 +38,67 @@ POPULAR_SEARCH_PAGES = [
 ]
 DISCOVERY_SEARCH_SORTS = ["Reviews_DESC", "", "Released_DESC"]
 DISCOVERY_OFFSET_LIMIT = 1000
+COLLECTION_DEAL_COUNT = 25
+DEAL_MODE_CONFIGS = {
+    "big_names": {
+        "label": "Big names on sale",
+        "blurb": "Top-reviewed blockbuster discounts",
+        "source_label": "Steam Big Names",
+    },
+    "popular_indies": {
+        "label": "Popular indies",
+        "blurb": "Well-reviewed indie discounts",
+        "source_label": "Steam Popular Indies",
+    },
+    "hidden_gems": {
+        "label": "Hidden gems",
+        "blurb": "Lesser-known discounted games",
+        "source_label": "Steam Hidden Gems",
+    },
+    "deep_discounts": {
+        "label": "Deep discounts",
+        "blurb": "Highest discount percentages",
+        "source_label": "Steam Deep Discounts",
+    },
+}
+DEAL_CATEGORY_CONFIGS = {
+    "rpg": {
+        "label": "RPG",
+        "blurb": "Role-playing games on sale",
+        "source_label": "Steam RPG Deals",
+        "tags": "122",
+    },
+    "horror": {
+        "label": "Horror",
+        "blurb": "Horror games on sale",
+        "source_label": "Steam Horror Deals",
+        "tags": "1667",
+    },
+    "coop": {
+        "label": "Co-op",
+        "blurb": "Co-op games on sale",
+        "source_label": "Steam Co-op Deals",
+        "tags": "1685",
+    },
+    "cozy": {
+        "label": "Cozy",
+        "blurb": "Cozy games on sale",
+        "source_label": "Steam Cozy Deals",
+        "tags": "1716",
+    },
+    "strategy": {
+        "label": "Strategy",
+        "blurb": "Strategy games on sale",
+        "source_label": "Steam Strategy Deals",
+        "tags": "9",
+    },
+    "under_5": {
+        "label": "Under $5",
+        "blurb": "Discounted games priced at $5 or less",
+        "source_label": "Steam Under $5",
+        "max_price_usd": 5.0,
+    },
+}
 
 # Default source label when no seasonal Steam-wide sale is detected.
 DEFAULT_SOURCE_LABEL = "Steam Specials"
@@ -435,7 +496,7 @@ class SteamDealDetector:
                 break
         return hashtags
 
-    def _fetch_search_results_json(self, start=0, count=50, sort_by="", query=""):
+    def _fetch_search_results_json(self, start=0, count=50, sort_by="", query="", tags=""):
         """Call Steam's paginated search-results JSON endpoint.
 
         Returns the parsed JSON dict (with 'total_count' and 'results_html'),
@@ -453,6 +514,8 @@ class SteamDealDetector:
         }
         if sort_by:
             params['sort_by'] = sort_by
+        if tags:
+            params['tags'] = tags
         try:
             response = self.session.get(
                 STEAM_SEARCH_RESULTS_URL, params=params, timeout=15
@@ -574,6 +637,175 @@ class SteamDealDetector:
         self._enrich_descriptions(unique_deals, limit=min(count, DESCRIPTION_ENRICH_LIMIT))
         print_progress(f"Found {len(unique_deals)} discounted search results for \"{keyword}\"")
         return unique_deals[:count]
+
+    @staticmethod
+    def _discount_percent_from_deal(deal):
+        match = re.search(r'(\d+)', deal.get('discount', '') or '')
+        return int(match.group(1)) if match else 0
+
+    @staticmethod
+    def _price_usd_from_deal(deal):
+        match = re.search(r'(\d[\d,]*\.?\d*)', deal.get('price', '') or '')
+        if not match:
+            return None
+        return float(match.group(1).replace(',', ''))
+
+    def _dedupe_deals_by_name(self, deals):
+        unique_deals = []
+        seen_names = set()
+        for deal in deals:
+            key = deal['name'].lower()
+            if key in seen_names:
+                continue
+            unique_deals.append(deal)
+            seen_names.add(key)
+        return unique_deals
+
+    def _finalize_collection_deals(self, deals, source_label, count=COLLECTION_DEAL_COUNT):
+        deals = self._dedupe_deals_by_name(deals)
+        random.shuffle(deals)
+        deals = deals[:count]
+        for deal in deals:
+            deal['source'] = source_label
+        self._enrich_descriptions(deals)
+        print_progress(f"Found {len(deals)} deals for {source_label}")
+        return deals
+
+    def _filter_deals_by_max_price(self, deals, max_price_usd):
+        filtered = []
+        for deal in deals:
+            price = self._price_usd_from_deal(deal)
+            if price is not None and price <= max_price_usd:
+                filtered.append(deal)
+        return filtered
+
+    def _sample_deals_across_price_buckets(self, deals, max_price_usd, count=COLLECTION_DEAL_COUNT):
+        """Pick a varied mix across the full under-$X range, not only the cheapest games."""
+        deals = self._dedupe_deals_by_name(deals)
+        filtered = self._filter_deals_by_max_price(deals, max_price_usd)
+        if not filtered:
+            return []
+
+        bucket_edges = [0.0, 1.25, 2.5, 4.0, max_price_usd + 0.01]
+        buckets = [[] for _ in range(len(bucket_edges) - 1)]
+        for deal in filtered:
+            price = self._price_usd_from_deal(deal)
+            for index in range(len(buckets)):
+                low = bucket_edges[index]
+                high = bucket_edges[index + 1]
+                if low <= price < high:
+                    buckets[index].append(deal)
+                    break
+
+        per_bucket = max(1, count // len(buckets))
+        selected = []
+        selected_keys = set()
+        for bucket in buckets:
+            random.shuffle(bucket)
+            for deal in bucket[:per_bucket]:
+                key = deal['name'].lower()
+                if key in selected_keys:
+                    continue
+                selected_keys.add(key)
+                selected.append(deal)
+
+        if len(selected) < count:
+            remaining = [
+                deal for deal in filtered
+                if deal['name'].lower() not in selected_keys
+            ]
+            random.shuffle(remaining)
+            for deal in remaining:
+                selected.append(deal)
+                if len(selected) >= count:
+                    break
+
+        random.shuffle(selected)
+        return selected[:count]
+
+    def get_deal_mode_deals(self, mode_key, count=COLLECTION_DEAL_COUNT):
+        config = DEAL_MODE_CONFIGS.get(mode_key)
+        if not config:
+            return []
+
+        print_progress(f"Loading {config['label']}...")
+        deals = []
+
+        if mode_key == "big_names":
+            for sort_by, start in POPULAR_SEARCH_PAGES[:3]:
+                deals.extend(self._get_specials_page(start=start, count=20, sort_by=sort_by))
+        elif mode_key == "popular_indies":
+            data = self._fetch_search_results_json(
+                start=0,
+                count=max(count * 2, 50),
+                sort_by="Reviews_DESC",
+                tags="492",
+            )
+            if data and data.get('results_html'):
+                source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
+                deals = self._parse_search_results_html(data['results_html'], source_label)
+        elif mode_key == "hidden_gems":
+            sort_by = random.choice(["Released_DESC", "Reviews_DESC"])
+            total = self.get_total_specials_count()
+            page_count = max(count, 25)
+            if total and total > page_count:
+                min_start = 150
+                max_start = min(max(0, total - page_count), 2500)
+                start = random.randint(min_start, max_start) if max_start > min_start else min_start
+            else:
+                start = 150
+            deals = self._get_specials_page(start=start, count=page_count, sort_by=sort_by)
+        elif mode_key == "deep_discounts":
+            for start in (0, 50, 100, 150):
+                deals.extend(self._get_specials_page(start=start, count=30, sort_by="Reviews_DESC"))
+            deals = [
+                deal for deal in deals
+                if self._discount_percent_from_deal(deal) >= 70
+            ]
+            deals.sort(key=self._discount_percent_from_deal, reverse=True)
+
+        return self._finalize_collection_deals(deals, config['source_label'], count=count)
+
+    def get_category_deals(self, category_key, count=COLLECTION_DEAL_COUNT):
+        config = DEAL_CATEGORY_CONFIGS.get(category_key)
+        if not config:
+            return []
+
+        print_progress(f"Loading {config['label']} deals...")
+        deals = []
+
+        if category_key == "under_5":
+            max_price = config['max_price_usd']
+            for sort_by, start in POPULAR_SEARCH_PAGES:
+                deals.extend(self._get_specials_page(start=start, count=25, sort_by=sort_by))
+
+            total = self.get_total_specials_count()
+            max_start = min(max(0, (total or 1000) - 50), 1200)
+            for _ in range(3):
+                start = random.randint(0, max_start) if max_start > 0 else 0
+                sort_by = random.choice(["Reviews_DESC", "", "Released_DESC"])
+                deals.extend(self._get_specials_page(start=start, count=50, sort_by=sort_by))
+
+            deals = self._sample_deals_across_price_buckets(deals, max_price, count=count)
+            if not deals:
+                return []
+            for deal in deals:
+                deal['source'] = config['source_label']
+            self._enrich_descriptions(deals)
+            print_progress(f"Found {len(deals)} deals for {config['source_label']}")
+            return deals
+        else:
+            data = self._fetch_search_results_json(
+                start=0,
+                count=max(count * 2, 50),
+                sort_by="Reviews_DESC",
+                tags=config['tags'],
+            )
+            if data and data.get('results_html'):
+                source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
+                deals = self._parse_search_results_html(data['results_html'], source_label)
+
+        return self._finalize_collection_deals(deals, config['source_label'], count=count)
 
     def get_random_specials(self, count=50):
         """Get a balanced set of specials favoring reviewed/popular games.

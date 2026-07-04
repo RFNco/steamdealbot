@@ -9,13 +9,15 @@ A Twitter (𝕏) bot that automatically finds and posts Steam game deals with de
 - **Dynamic Source Label**: Shows the active seasonal sale name (e.g. "Steam Summer Sale") when one is running, otherwise "Steam Specials"
 - **Relevant Game Hashtags**: Adds genre/tag hashtags (e.g. `#OpenWorld #RPG`) per game for better reach
 - **Rich Tweet Format**: Posts engaging tweets with game descriptions and Steam store links
-- **Keyword Deal Search**: Search discounted Steam games by keyword and copy a matching tweet
+- **Keyword Deal Search**: Search discounted Steam games by keyword and copy one or more matching tweets
+- **Deal Collections**: Browse deal modes and category collections for thread-style posting (RPG, under $5, deep discounts, and more)
+- **Posted-Game Memory**: Manual poster remembers copied games and surfaces fresher picks on refresh
 - **Automated Posting**: Runs every 6 hours via GitHub Actions
 - **Smart Deal Selection**: Finds the best deals with highest discount percentages
 - **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
 - **Easy Setup**: Simple installation and deployment process
 - **280-Character Tweets**: Each deal tweet is auto-fitted to 280 characters (configurable in `steam_deals.py`)
-- **Manual Poster CLI**: Terminal tool with ASCII banner, single/bulk copy, semi-fresh tweet ideas, and copy-to-clipboard for 𝕏
+- **Manual Poster CLI**: Terminal tool (v2.1.3) with ASCII banner, collections, posted-game memory, and copy-to-clipboard for 𝕏
 
 ## Prerequisites
 
@@ -100,20 +102,21 @@ Since the free Twitter API tier doesn't allow posting tweets, you can use these 
 python manual_poster.py
 ```
 
-On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster** header, then an interactive loop to browse deals.
+On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.3** header, then an interactive loop to browse deals.
 
 **Features:**
-- ASCII banner on startup (©RFNco)
+- ASCII banner on startup (©RFNco) with manual poster version label
 - Plain-text terminal UI (no decorative emoji in prompts)
 - Shows real Steam deals with USD prices
 - Different games on every refresh (random sampling of Steam's specials)
+- Posted-game memory: copied tweets are saved locally and recently copied games move to the end for more variety
+- Amber `Posted` label on deal headers for recently copied games
 - Copy one tweet or bulk copy the next 5 deal tweets for faster posting
-- Bulk copy automatically skips copied deals so they do not show again as uncopied deals
-- Generate 5 themed tweet ideas for Steam, Nintendo, or general gaming
-- Search discounted Steam games by keyword, then copy one matching tweet
+- Generate 5 themed tweet ideas, browse deal modes, or browse category collections under **Collections & ideas**
+- Search discounted Steam games by keyword, then copy one or more matching tweets without re-searching
 - Steam and general gaming ideas can use current Steam deal data; Nintendo ideas stay template-only for now
 - Character count per tweet shown as `242/280` (see [Tweet length limit](#tweet-length-limit))
-- Menu: copy tweet, next deal, bulk copy, generate ideas, refresh deals/idea sources, search by keyword, or exit
+- Menu: copy tweet, next deal, bulk copy, collections & ideas, refresh, search by keyword, or exit
 - Clipboard fallbacks: pyperclip, Termux, macOS `pbcopy`, Windows `clip`
 
 ### Method 2: Desktop Shortcut (Windows)
@@ -191,6 +194,7 @@ steamdealbot/
 ├── SteamDealBot.bat             # Desktop shortcut for Windows
 ├── CHANGELOG.md                 # Versioned change history
 ├── ROADMAP.md                   # Future improvement checklist
+├── .manual_poster_posted.json   # Local copied-game history (created at runtime, gitignored)
 ├── requirements.txt             # Python dependencies
 └── README.md                   # This file
 ```
@@ -249,7 +253,24 @@ The manual poster can also generate 5 non-AI tweet ideas:
 - **Nintendo**: template-only Nintendo-related ideas for now, with no Steam game links
 - **Gaming**: mixes reusable gaming templates with current Steam deal data when useful
 
-Use **Refresh deals and idea sources** to fetch a fresh deal set before generating more ideas.
+Use **Refresh** to fetch a fresh deal set before generating more ideas.
+
+### Collections & ideas
+
+Option **4. Collections & ideas** opens a second menu for thread-style content:
+
+- **Themed tweet ideas**: Steam, Nintendo, or general gaming idea batches
+- **Deal modes**: big names, popular indies, hidden gems, deep discounts
+- **Categories**: RPG, horror, co-op, cozy, strategy, under $5
+
+Each collection shows a numbered list with discount and price, supports multi-pick copy (`3`, `3,7`, or `3-5`), and uses collection-specific source labels such as `Steam RPG Deals` or `Steam Under $5`.
+
+### Posted-game memory
+
+When you copy a deal tweet, the manual poster saves it to a local `.manual_poster_posted.json` file (gitignored). For the next 14 days:
+
+- Recently copied games are moved to the end of the list on refresh/restart
+- Deal headers show an amber `Posted` label when that game appears again
 
 ### Keyword deal search
 
@@ -259,7 +280,7 @@ The manual poster can search discounted Steam games directly by keyword:
 Search discounted Steam games by keyword: Baldur
 ```
 
-The search uses Steam's specials endpoint with the keyword and only returns discounted matches. Results are shown as a compact numbered list with game title and discount percentage; choosing a number copies the full formatted tweet for that game.
+The search uses Steam's specials endpoint with the keyword and only returns discounted matches. Results are shown as a compact numbered list with game title, discount, and price. You can copy one or more picks (`3`, `3,7`, or `3-5`) and stay in the same search to copy more before going back.
 
 ## Customization
 
@@ -300,7 +321,8 @@ To customize the bot for your needs:
    - Check the deal detection logic in `steam_deals.py`
 
 5. **Same games repeating on refresh**
-   - Deals are now blended from popular/reviewed pages plus a capped discovery sample, so some high-signal games may appear more often by design
+   - Deals are blended from popular/reviewed pages plus a capped discovery sample, so some high-signal games may appear more often by design
+   - Copied games are also saved locally and deprioritized for 14 days to keep refreshes fresher
    - If you still see repeats, the paginated endpoint may have failed and the code fell back to the curated featured list — check the console for fetch errors
 
 6. **Missing descriptions or genre hashtags**
@@ -321,9 +343,10 @@ To customize the bot for your needs:
 - **Dynamic Source Label**: Seasonal sale name when active, else "Steam Specials"
 - **Genre Hashtags**: Up to 2 relevant game tags per tweet for reach
 - **Tweet Formatting**: 280-character cap, strikethrough original prices, clean Steam app URLs, and smart truncation
-- **Manual Posting**: ASCII banner CLI, single/bulk clipboard copy, auto-skip after bulk copy, `current/280` length display
+- **Manual Posting**: ASCII banner CLI (v2.1.3), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
 - **Tweet Ideas**: 5 themed non-AI ideas using templates plus current deal data for Steam/general gaming
-- **Keyword Search**: Search current discounted Steam games by keyword and copy one matching tweet
+- **Collections**: Deal modes and category browsing for thread-style posting
+- **Keyword Search**: Search discounted Steam games by keyword and copy one or more matching tweets
 - **Desktop Shortcut**: Easy one-click access on Windows
 - **Web Interface**: Web UI for deal browsing
 - **GitHub Actions**: Runs automatically every 6 hours
@@ -338,7 +361,7 @@ To customize the bot for your needs:
 1. **Upgrade Twitter API**: Get Basic or Pro access to enable automated posting
 2. **Add More Sources**: Integrate other game stores (Epic, GOG, etc.)
 3. **Image Support**: Add game screenshots to tweets
-4. **Advanced Filtering**: Filter by game genre, price range, etc.
+4. **Advanced Filtering**: More deal modes, categories, and posted-history controls
 5. **Mobile App**: Create mobile app for easier manual posting
 
 ## Contributing

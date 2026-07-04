@@ -6,7 +6,26 @@ All notable changes to SteamDealBot will be documented in this file.
 
 - Add future changes here before tagging a new version.
 
-## [2.1.2] - 2026-06-30
+## [v2.1.3] - 04-07-2026
+
+### Added
+
+- Added manual poster version label in the banner (`Manual Poster - v2.1.3`).
+- Added posted-game history for the manual poster: copied tweets are saved locally and recently posted games are deprioritized on refresh/restart.
+- Added amber `Posted` status on deal headers for recently copied games.
+- Added multi-pick keyword search copy (`3`, `3,7`, or `3-5`) with a stay-open search loop.
+- Added `Collections & ideas` submenu with themed tweet ideas, deal modes, and category collections.
+- Added deal mode collections: big names, popular indies, hidden gems, and deep discounts.
+- Added category collections: RPG, horror, co-op, cozy, strategy, and under $5.
+- Added balanced under-$5 sampling across multiple price buckets so results are not only the cheapest games.
+
+### Changed
+
+- Renamed main manual poster menu options to `Copy this tweet`, `Copy next 5 deals`, and `Refresh`.
+- Moved themed tweet ideas under the new `Collections & ideas` menu to keep the main menu compact.
+- Updated README and ROADMAP for v2.1.3 manual poster workflow changes.
+
+## [v2.1.2] - 30-06-2026
 
 ### Added
 
@@ -23,7 +42,7 @@ All notable changes to SteamDealBot will be documented in this file.
 - Preserved numbered game titles such as `Baldur's Gate 3` when cleaning Steam result names.
 - Updated README documentation for v2.1.2 manual poster colors, selected idea copying, balanced deal sampling, and keyword search.
 
-## [2.1.1] - 2026-06-25
+## [v2.1.1] - 25-06-2026
 
 ### Added
 

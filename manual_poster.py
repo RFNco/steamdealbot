@@ -14,14 +14,21 @@ Android (Termux) quick start:
   `termux-clipboard-set` automatically when available.
 """
 
-from steam_deals import SteamDealDetector, TWEET_MAX_LENGTH
+from steam_deals import (
+    SteamDealDetector,
+    TWEET_MAX_LENGTH,
+    DEAL_MODE_CONFIGS,
+    DEAL_CATEGORY_CONFIGS,
+)
+import json
+import re
 import time
 import sys
 import os
 import random
 import shutil
 import subprocess
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 # Try to import pyperclip optionally; we provide fallbacks below
 try:
@@ -30,6 +37,15 @@ try:
 except Exception:
     pyperclip = None  # type: ignore
     _HAS_PYPERCLIP = False
+
+VERSION = "v2.1.3"
+
+POSTED_HISTORY_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    ".manual_poster_posted.json",
+)
+POSTED_DEPRIORITIZE_DAYS = 14
+POSTED_HISTORY_MAX_ENTRIES = 300
 
 BANNER = (
     "   ____________________    __  ___ \n"
@@ -168,7 +184,6 @@ TWEET_IDEA_THEME_EXTRAS = {
         "What game deserves more attention than it gets? #Gaming #GameDeals",
     ],
 }
-
 for theme_key, extra_templates in TWEET_IDEA_THEME_EXTRAS.items():
     TWEET_IDEA_THEMES[theme_key][1].extend(extra_templates)
 
@@ -203,6 +218,7 @@ def format_menu_option(number: int, text: str) -> str:
     option_style = {
         1: "tweet",
         2: "title",
+        4: "title",
     }.get(number, "value")
     return color_text(f"{number}. ", "muted") + color_text(text, option_style)
 
@@ -220,7 +236,7 @@ def print_banner() -> None:
             themed_print(line, "banner")
     print()
     print_separator(len(SEPARATOR))
-    themed_print("Manual Poster", "title")
+    themed_print(f"Manual Poster - {VERSION}", "title")
     print_separator(len(SEPARATOR))
 
 
@@ -251,6 +267,239 @@ def print_tweet_idea(index: int, idea: str) -> None:
             themed_print(line, "value")
         else:
             print()
+
+
+def _deal_key(deal: Dict) -> str:
+    steam_url = deal.get("steam_url", "")
+    match = re.search(r"/app/(\d+)", steam_url)
+    if match:
+        return match.group(1)
+    return deal.get("name", "").strip().lower()
+
+
+def load_posted_history() -> Dict[str, Dict]:
+    if not os.path.exists(POSTED_HISTORY_FILE):
+        return {}
+
+    try:
+        with open(POSTED_HISTORY_FILE, encoding="utf-8") as history_file:
+            data = json.load(history_file)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    entries = data.get("entries", {})
+    if isinstance(entries, list):
+        entries = {
+            _deal_key(entry): entry
+            for entry in entries
+            if isinstance(entry, dict)
+        }
+    return entries if isinstance(entries, dict) else {}
+
+
+def save_posted_history(history: Dict[str, Dict]) -> None:
+    sorted_entries = sorted(
+        history.values(),
+        key=lambda entry: entry.get("posted_at", 0),
+        reverse=True,
+    )[:POSTED_HISTORY_MAX_ENTRIES]
+    trimmed_history = {_deal_key(entry): entry for entry in sorted_entries}
+
+    with open(POSTED_HISTORY_FILE, "w", encoding="utf-8") as history_file:
+        json.dump({"entries": trimmed_history}, history_file, indent=2)
+
+
+def mark_deal_posted(deal: Dict) -> None:
+    history = load_posted_history()
+    history[_deal_key(deal)] = {
+        "name": deal.get("name", ""),
+        "steam_url": deal.get("steam_url", ""),
+        "price": deal.get("price", ""),
+        "posted_at": time.time(),
+    }
+    save_posted_history(history)
+
+
+def mark_deals_posted(deals: List[Dict]) -> None:
+    if not deals:
+        return
+
+    history = load_posted_history()
+    posted_at = time.time()
+    for deal in deals:
+        history[_deal_key(deal)] = {
+            "name": deal.get("name", ""),
+            "steam_url": deal.get("steam_url", ""),
+            "price": deal.get("price", ""),
+            "posted_at": posted_at,
+        }
+    save_posted_history(history)
+
+
+def deprioritize_posted_deals(deals: List[Dict]) -> Tuple[List[Dict], int]:
+    history = load_posted_history()
+    if not history:
+        return deals, 0
+
+    cutoff = time.time() - (POSTED_DEPRIORITIZE_DAYS * 86400)
+    fresh_deals = []
+    posted_deals = []
+
+    for deal in deals:
+        entry = history.get(_deal_key(deal))
+        if entry and entry.get("posted_at", 0) >= cutoff:
+            posted_deals.append(deal)
+        else:
+            fresh_deals.append(deal)
+
+    if posted_deals:
+        random.shuffle(posted_deals)
+
+    return fresh_deals + posted_deals, len(posted_deals)
+
+
+def is_recently_posted(deal: Dict) -> bool:
+    history = load_posted_history()
+    entry = history.get(_deal_key(deal))
+    if not entry:
+        return False
+
+    cutoff = time.time() - (POSTED_DEPRIORITIZE_DAYS * 86400)
+    return entry.get("posted_at", 0) >= cutoff
+
+
+def print_deal_header(deal_number: int, deal: Dict) -> None:
+    header = color_text(f"\nDeal #{deal_number}", "muted")
+    if is_recently_posted(deal):
+        header += color_text(" Posted", "warning")
+    print(header)
+    themed_print(deal["name"], "value")
+
+
+def parse_result_selection(text: str, max_index: int) -> List[int]:
+    """Parse selections like 3, 3,7,12, 3 7, or 3-5 into valid result numbers."""
+    indices: List[int] = []
+
+    for part in re.split(r"[,\s]+", text.strip()):
+        if not part:
+            continue
+
+        if "-" in part:
+            range_parts = part.split("-", 1)
+            if len(range_parts) != 2:
+                return []
+            try:
+                start_index = int(range_parts[0])
+                end_index = int(range_parts[1])
+            except ValueError:
+                return []
+
+            if start_index > end_index:
+                start_index, end_index = end_index, start_index
+            indices.extend(range(start_index, end_index + 1))
+            continue
+
+        try:
+            indices.append(int(part))
+        except ValueError:
+            return []
+
+    unique_indices: List[int] = []
+    seen_indices = set()
+    for index in indices:
+        if index < 1 or index > max_index:
+            return []
+        if index not in seen_indices:
+            seen_indices.add(index)
+            unique_indices.append(index)
+
+    return unique_indices
+
+
+def print_collection_results(title: str, results: List[Dict]) -> None:
+    themed_print(f"\n{title}:", "title")
+    themed_print("-" * 30, "muted")
+    for index, deal in enumerate(results, 1):
+        posted_tag = color_text(" Posted", "warning") if is_recently_posted(deal) else ""
+        price_text = deal.get("price")
+        price_suffix = color_text(f" {price_text}", "muted") if price_text else ""
+        print(
+            color_text(f"{index}. ", "muted")
+            + color_text(deal["name"], "value")
+            + color_text(f" {deal['discount']}", "muted")
+            + price_suffix
+            + posted_tag
+        )
+
+
+def copy_collection_results(
+    detector: SteamDealDetector,
+    results: List[Dict],
+    indices: List[int],
+) -> bool:
+    selected_deals = [results[index - 1] for index in indices]
+
+    if len(selected_deals) == 1:
+        selected_tweet = detector.format_deal_tweet(selected_deals[0])
+        copied = copy_to_clipboard(selected_tweet)
+        preview_text = selected_tweet
+        success_message = f"Pick #{indices[0]} copied to clipboard!"
+    else:
+        preview_text = format_bulk_tweets(detector, selected_deals)
+        copied = copy_to_clipboard(preview_text)
+        index_list = ", ".join(str(index) for index in indices)
+        success_message = (
+            f"Picks {index_list} copied to clipboard ({len(selected_deals)} tweets)!"
+        )
+
+    if copied:
+        mark_deals_posted(selected_deals)
+        themed_print(success_message, "success")
+        themed_print("Marked as posted for more variety on future refreshes.", "muted")
+    else:
+        themed_print("Could not copy the selected pick(s) automatically.", "error")
+        themed_print("Please manually copy the selected tweet(s) above if needed.", "warning")
+
+    print()
+    themed_print("-" * 30, "muted")
+    print_tweet_preview(preview_text)
+    themed_print("-" * 30, "muted")
+    return copied
+
+
+def show_collection_copy_loop(
+    detector: SteamDealDetector,
+    title: str,
+    results: List[Dict],
+) -> None:
+    results, posted_count = deprioritize_posted_deals(results)
+    if not results:
+        themed_print(f"No deals found for {title}.", "warning")
+        return
+
+    if posted_count:
+        themed_print(
+            f"Moved {posted_count} recently copied game"
+            f"{'s' if posted_count != 1 else ''} to the end for more variety.",
+            "muted",
+        )
+
+    print_collection_results(title, results)
+
+    while True:
+        copy_choice = themed_input(
+            f"\nCopy which pick(s)? (1-{len(results)}, e.g. 3 or 3,7 or 3-5, Enter=back): "
+        ).strip()
+        if not copy_choice:
+            return
+
+        indices = parse_result_selection(copy_choice, len(results))
+        if not indices:
+            themed_print("Invalid selection. Use numbers like 3, 3,7, or 3-5.", "error")
+            continue
+
+        copy_collection_results(detector, results, indices)
+        themed_print("Copy more from this collection, or press Enter to go back.", "muted")
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -460,6 +709,110 @@ def show_tweet_ideas_menu(deals: List[Dict]) -> None:
         themed_print("Please manually copy the selected idea above if needed.", "warning")
 
 
+def show_deal_modes_menu(detector: SteamDealDetector) -> None:
+    mode_keys = list(DEAL_MODE_CONFIGS.keys())
+
+    while True:
+        themed_print("\nDeal modes:", "title")
+        themed_print("Build a thread from a focused sale slice.", "muted")
+        themed_print("-" * 30, "muted")
+        for index, mode_key in enumerate(mode_keys, 1):
+            config = DEAL_MODE_CONFIGS[mode_key]
+            print(
+                color_text(f"{index}. ", "muted")
+                + color_text(config["label"], "value")
+                + color_text(f" - {config['blurb']}", "muted")
+            )
+
+        choice = themed_input("\nChoose a deal mode (Enter=back): ").strip()
+        if not choice:
+            return
+
+        try:
+            mode_index = int(choice)
+        except ValueError:
+            themed_print("Invalid deal mode number.", "error")
+            continue
+
+        if mode_index < 1 or mode_index > len(mode_keys):
+            themed_print("Invalid deal mode number.", "error")
+            continue
+
+        mode_key = mode_keys[mode_index - 1]
+        config = DEAL_MODE_CONFIGS[mode_key]
+        deals = detector.get_deal_mode_deals(mode_key)
+        show_collection_copy_loop(detector, config["label"], deals)
+
+
+def show_deal_categories_menu(detector: SteamDealDetector) -> None:
+    category_keys = list(DEAL_CATEGORY_CONFIGS.keys())
+
+    while True:
+        themed_print("\nCategories:", "title")
+        themed_print("Browse discounted games by genre or price.", "muted")
+        themed_print("-" * 30, "muted")
+        for index, category_key in enumerate(category_keys, 1):
+            config = DEAL_CATEGORY_CONFIGS[category_key]
+            print(
+                color_text(f"{index}. ", "muted")
+                + color_text(config["label"], "value")
+                + color_text(f" - {config['blurb']}", "muted")
+            )
+
+        choice = themed_input("\nChoose a category (Enter=back): ").strip()
+        if not choice:
+            return
+
+        try:
+            category_index = int(choice)
+        except ValueError:
+            themed_print("Invalid category number.", "error")
+            continue
+
+        if category_index < 1 or category_index > len(category_keys):
+            themed_print("Invalid category number.", "error")
+            continue
+
+        category_key = category_keys[category_index - 1]
+        config = DEAL_CATEGORY_CONFIGS[category_key]
+        deals = detector.get_category_deals(category_key)
+        show_collection_copy_loop(detector, config["label"], deals)
+
+
+def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> None:
+    while True:
+        themed_print("\nCollections & ideas:", "title")
+        themed_print("-" * 30, "muted")
+        print(
+            color_text("1. ", "muted")
+            + color_text("Themed tweet ideas", "value")
+            + color_text(" - engagement posts using current deals", "muted")
+        )
+        print(
+            color_text("2. ", "muted")
+            + color_text("Deal modes", "value")
+            + color_text(" - big names, indies, hidden gems, deep discounts", "muted")
+        )
+        print(
+            color_text("3. ", "muted")
+            + color_text("Categories", "value")
+            + color_text(" - RPG, horror, co-op, cozy, strategy, under $5", "muted")
+        )
+
+        choice = themed_input("\nChoose an option (Enter=back): ").strip()
+        if not choice:
+            return
+
+        if choice == "1":
+            show_tweet_ideas_menu(deals)
+        elif choice == "2":
+            show_deal_modes_menu(detector)
+        elif choice == "3":
+            show_deal_categories_menu(detector)
+        else:
+            themed_print("Invalid choice. Please try again.", "error")
+
+
 def show_keyword_search_menu(detector: SteamDealDetector) -> None:
     keyword = themed_input("\nSearch discounted Steam games by keyword: ").strip()
     if not keyword:
@@ -471,45 +824,7 @@ def show_keyword_search_menu(detector: SteamDealDetector) -> None:
         themed_print(f"No discounted games found for \"{keyword}\" right now.", "warning")
         return
 
-    themed_print(f"\nSearch results for \"{keyword}\":", "title")
-    themed_print("-" * 30, "muted")
-    for index, deal in enumerate(results, 1):
-        print(
-            color_text(f"{index}. ", "muted")
-            + color_text(deal['name'], "value")
-            + color_text(f" {deal['discount']}", "muted")
-        )
-
-    copy_choice = themed_input(
-        f"\nCopy which search result? (1-{len(results)}, Enter=cancel): "
-    ).strip()
-    if not copy_choice:
-        return
-
-    try:
-        result_index = int(copy_choice)
-    except ValueError:
-        themed_print("Invalid result number.", "error")
-        return
-
-    if result_index < 1 or result_index > len(results):
-        themed_print("Invalid result number.", "error")
-        return
-
-    selected_tweet = detector.format_deal_tweet(results[result_index - 1])
-    if copy_to_clipboard(selected_tweet):
-        themed_print(f"Search result #{result_index} copied to clipboard!", "success")
-        print()
-        themed_print("-" * 30, "muted")
-        print_tweet_preview(selected_tweet)
-        themed_print("-" * 30, "muted")
-    else:
-        themed_print("Could not copy that search result automatically.", "error")
-        themed_print("Please manually copy the selected tweet above if needed.", "warning")
-        print()
-        themed_print("-" * 30, "muted")
-        print_tweet_preview(selected_tweet)
-        themed_print("-" * 30, "muted")
+    show_collection_copy_loop(detector, f'Search results for "{keyword}"', results)
 
 def main():
     print_banner()
@@ -519,12 +834,19 @@ def main():
     while True:
         themed_print("Fetching latest Steam deals...", "muted")
         deals = detector.get_all_deals()
+        deals, posted_count = deprioritize_posted_deals(deals)
         
         if not deals:
             themed_print("No deals found. Try again later.", "warning")
             continue
         
         themed_print(f"Found {len(deals)} deals!", "success")
+        if posted_count:
+            themed_print(
+                f"Moved {posted_count} recently copied game"
+                f"{'s' if posted_count != 1 else ''} to the end for more variety.",
+                "muted",
+            )
         print()
         print_separator(50)
         
@@ -535,7 +857,7 @@ def main():
             deal = deals[deal_index]
             deal_number = deal_index + 1
 
-            print_muted_label_value(f"\nDeal #{deal_number}", deal['name'])
+            print_deal_header(deal_number, deal)
             
             # Format the tweet
             tweet = detector.format_deal_tweet(deal)
@@ -551,15 +873,15 @@ def main():
                 "\n"
                 + color_text("What would you like to do?", "muted")
                 + "\n"
-                + format_menu_option(1, "Copy this tweet to clipboard")
+                + format_menu_option(1, "Copy this tweet")
                 + "\n"
                 + format_menu_option(2, "Show next deal")
                 + "\n"
-                + format_menu_option(3, f"Copy next {BULK_COPY_COUNT} deals to clipboard")
+                + format_menu_option(3, f"Copy next {BULK_COPY_COUNT} deals")
                 + "\n"
-                + format_menu_option(4, "Generate themed tweet ideas")
+                + format_menu_option(4, "Collections & ideas")
                 + "\n"
-                + format_menu_option(5, "Refresh deals and idea sources")
+                + format_menu_option(5, "Refresh")
                 + "\n"
                 + format_menu_option(6, "Search by keyword")
                 + "\n"
@@ -570,7 +892,9 @@ def main():
             
             if choice == '1':
                 if copy_to_clipboard(tweet):
+                    mark_deal_posted(deal)
                     themed_print("Tweet copied to clipboard! You can now paste it on 𝕏.", "success")
+                    themed_print("Marked as posted for more variety on future refreshes.", "muted")
                 else:
                     themed_print("Could not copy to clipboard automatically.", "error")
                     if not _HAS_PYPERCLIP:
@@ -591,7 +915,9 @@ def main():
                 bulk_tweets = format_bulk_tweets(detector, bulk_deals)
 
                 if copy_to_clipboard(bulk_tweets):
+                    mark_deals_posted(bulk_deals)
                     themed_print(f"{len(bulk_deals)} deal tweets copied to clipboard! You can now paste them on 𝕏.", "success")
+                    themed_print("Marked those games as posted for more variety on future refreshes.", "muted")
                 else:
                     themed_print("Could not copy the deal tweets to clipboard automatically.", "error")
                     if not _HAS_PYPERCLIP:
@@ -603,7 +929,7 @@ def main():
                 deal_index += len(bulk_deals)
 
             elif choice == '4':
-                show_tweet_ideas_menu(deals)
+                show_collections_menu(detector, deals)
                 themed_input("\nPress Enter to continue...", "muted")
                 continue
 
