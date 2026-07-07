@@ -17,7 +17,7 @@ A Twitter (𝕏) bot that automatically finds and posts Steam game deals with de
 - **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
 - **Easy Setup**: Simple installation and deployment process
 - **280-Character Tweets**: Each deal tweet is auto-fitted to 280 characters (configurable in `steam_deals.py`)
-- **Manual Poster CLI**: Terminal tool (v2.1.3) with ASCII banner, collections, posted-game memory, and copy-to-clipboard for 𝕏
+- **Manual Poster CLI**: Terminal tool (v2.1.4) with ASCII banner, collections, posted-game memory, and copy-to-clipboard for 𝕏
 
 ## Prerequisites
 
@@ -102,7 +102,7 @@ Since the free Twitter API tier doesn't allow posting tweets, you can use these 
 python manual_poster.py
 ```
 
-On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.3** header, then an interactive loop to browse deals.
+On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.4** header, then an interactive loop to browse deals.
 
 **Features:**
 - ASCII banner on startup (©RFNco) with manual poster version label
@@ -114,9 +114,10 @@ On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.3
 - Copy one tweet or bulk copy the next 5 deal tweets for faster posting
 - Generate 5 themed tweet ideas, browse deal modes, or browse category collections under **Collections & ideas**
 - Search discounted Steam games by keyword, then copy one or more matching tweets without re-searching
+- Open a separate Nintendo US deals menu (optional keyword) and copy one selected Nintendo tweet
 - Steam and general gaming ideas can use current Steam deal data; Nintendo ideas stay template-only for now
 - Character count per tweet shown as `242/280` (see [Tweet length limit](#tweet-length-limit))
-- Menu: copy tweet, next deal, bulk copy, collections & ideas, refresh, search by keyword, or exit
+- Menu: copy tweet, next deal, bulk copy, collections & ideas, refresh, Steam keyword search, Nintendo US deals, or exit
 - Clipboard fallbacks: pyperclip, Termux, macOS `pbcopy`, Windows `clip`
 
 ### Method 2: Desktop Shortcut (Windows)
@@ -282,6 +283,26 @@ Search discounted Steam games by keyword: Baldur
 
 The search uses Steam's specials endpoint with the keyword and only returns discounted matches. Results are shown as a compact numbered list with game title, discount, and price. You can copy one or more picks (`3`, `3,7`, or `3-5`) and stay in the same search to copy more before going back.
 
+### Nintendo US deals menu
+
+The manual poster includes a separate Nintendo menu so Nintendo deals are not mixed into the main Steam feed.
+
+```text
+7. Nintendo US deals
+```
+
+You can browse Nintendo deals one-by-one with a dedicated submenu:
+
+- Copy current Nintendo tweet
+- Show next Nintendo deal
+- Search Nintendo keyword
+- Refresh Nintendo deals
+- Back to Steam menu
+
+Nintendo keyword search uses the same pick syntax as Steam search for copying: single (`3`), list (`3,7`), or range (`3-5`).
+
+If Nintendo's legacy US sales endpoint is unavailable, the bot falls back to the free `nintendeals` provider for US deal lookup.
+
 ## Customization
 
 To customize the bot for your needs:
@@ -343,7 +364,7 @@ To customize the bot for your needs:
 - **Dynamic Source Label**: Seasonal sale name when active, else "Steam Specials"
 - **Genre Hashtags**: Up to 2 relevant game tags per tweet for reach
 - **Tweet Formatting**: 280-character cap, strikethrough original prices, clean Steam app URLs, and smart truncation
-- **Manual Posting**: ASCII banner CLI (v2.1.3), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
+- **Manual Posting**: ASCII banner CLI (v2.1.4), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
 - **Tweet Ideas**: 5 themed non-AI ideas using templates plus current deal data for Steam/general gaming
 - **Collections**: Deal modes and category browsing for thread-style posting
 - **Keyword Search**: Search discounted Steam games by keyword and copy one or more matching tweets

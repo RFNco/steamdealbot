@@ -7,6 +7,16 @@ from bs4 import BeautifulSoup
 import re
 import urllib.parse
 import os
+import itertools
+
+try:
+    from nintendeals import noa as nintendo_noa  # type: ignore[import-not-found]
+    from nintendeals.api import prices as nintendo_prices  # type: ignore[import-not-found]
+    _HAS_NINTENDO_DEALS_LIB = True
+except Exception:
+    nintendo_noa = None  # type: ignore
+    nintendo_prices = None  # type: ignore
+    _HAS_NINTENDO_DEALS_LIB = False
 
 TWEET_MAX_LENGTH = 280
 STEAMDEALBOT_COLOR_ENABLED = os.environ.get("STEAMDEALBOT_NO_COLOR") != "1"
@@ -24,6 +34,7 @@ def print_progress(message):
 # supports pagination, which lets us sample a different slice of specials on
 # every refresh (thousands of deals are available, not just the curated ~10).
 STEAM_SEARCH_RESULTS_URL = "https://store.steampowered.com/search/results/"
+NINTENDO_US_SALES_URL = "https://ec.nintendo.com/api/US/en/search/sales"
 # How many descriptions to enrich per refresh (each one is an extra page load).
 DESCRIPTION_ENRICH_LIMIT = 12
 # Keep most manual-poster results near Steam's high-signal pages so the feed
@@ -180,6 +191,7 @@ class SteamDealDetector:
                                 'discount': f"-{discount_percent}%",
                                 'price': f"${final_price_dollars:.2f}",
                                 'original_price': f"${original_price_dollars:.2f}",
+                                'time_left': self._time_left_from_unix(item.get('discount_expiration')),
                                 'source': 'Steam Popular Deals',
                                 'description': description,
                                 'steam_url': steam_url
@@ -638,6 +650,290 @@ class SteamDealDetector:
         print_progress(f"Found {len(unique_deals)} discounted search results for \"{keyword}\"")
         return unique_deals[:count]
 
+    def get_nintendo_us_deals(self, keyword="", count=30):
+        """Get discounted Nintendo eShop US deals (separate from Steam)."""
+        params = {
+            "count": max(1, min(count, 100)),
+            "offset": 0,
+        }
+        keyword = (keyword or "").strip()
+        if keyword:
+            # Keep both for compatibility with endpoint variants.
+            params["q"] = keyword
+            params["query"] = keyword
+
+        try:
+            response = self.session.get(
+                NINTENDO_US_SALES_URL, params=params, timeout=20
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            print_progress(f"Nintendo US deals endpoint unavailable: {e}")
+            return self._get_nintendo_us_deals_from_library(keyword=keyword, count=count)
+
+        items = []
+        if isinstance(data, dict):
+            items = data.get("items") or data.get("contents") or data.get("results") or []
+        if not isinstance(items, list):
+            items = []
+
+        deals = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            name = (
+                item.get("formal_name")
+                or item.get("title")
+                or item.get("name")
+                or ""
+            ).strip()
+            if len(name) < 2:
+                continue
+
+            url = item.get("url") or item.get("deep_link") or item.get("product_url") or ""
+            if url.startswith("/"):
+                url = f"https://www.nintendo.com{url}"
+            if not url:
+                slug = item.get("slug")
+                if slug:
+                    url = f"https://www.nintendo.com/us/store/products/{slug}/"
+            if not url:
+                continue
+
+            regular = item.get("regular_price")
+            sale = item.get("discount_price")
+            sale_end_text = None
+            regular_value = None
+            sale_value = None
+            if isinstance(regular, dict):
+                try:
+                    regular_value = float(regular.get("raw_value") or regular.get("amount"))
+                except Exception:
+                    regular_value = None
+            if isinstance(sale, dict):
+                try:
+                    sale_value = float(sale.get("raw_value") or sale.get("amount"))
+                except Exception:
+                    sale_value = None
+                sale_end_text = (
+                    sale.get("end_datetime")
+                    or sale.get("endDate")
+                    or sale.get("sale_end")
+                )
+            if sale_value is None:
+                # Try generic fallback fields.
+                try:
+                    sale_value = float(item.get("sale_price") or item.get("price"))
+                except Exception:
+                    sale_value = None
+            if not sale_end_text:
+                sale_end_text = (
+                    item.get("sale_end")
+                    or item.get("sale_end_datetime")
+                    or item.get("discount_end_datetime")
+                )
+            if sale_value is None:
+                continue
+
+            price = f"${sale_value:.2f}"
+            original_price = None
+            discount = "-0%"
+            if regular_value and regular_value > sale_value:
+                original_price = f"${regular_value:.2f}"
+                discount_pct = round((1 - (sale_value / regular_value)) * 100)
+                discount = f"-{discount_pct}%"
+
+            description = (
+                item.get("description")
+                or item.get("catch_copy")
+                or item.get("excerpt")
+                or f"{name} is currently discounted on Nintendo eShop US."
+            )
+            description = " ".join(str(description).split())
+
+            deals.append(
+                {
+                    "name": name,
+                    "discount": discount,
+                    "price": price,
+                    "original_price": original_price,
+                    "source": "Nintendo eShop US",
+                        "time_left": self._nintendo_time_left_text(sale_end_text),
+                    "description": description,
+                    "steam_url": url,
+                    "tags": ["NintendoSwitch", "Nintendo"],
+                }
+            )
+
+        if keyword:
+            keyword_lower = keyword.lower()
+            deals = [d for d in deals if keyword_lower in d["name"].lower()]
+
+        deals = self._dedupe_deals_by_name(deals)
+        if not deals:
+            return self._get_nintendo_us_deals_from_library(keyword=keyword, count=count)
+        print_progress(
+            f"Found {len(deals)} Nintendo US discounted games"
+            + (f" for \"{keyword}\"" if keyword else "")
+        )
+        return deals[:count]
+
+    def _get_nintendo_us_deals_from_library(self, keyword="", count=30):
+        """Fallback Nintendo US deals source via the nintendeals library."""
+        if not _HAS_NINTENDO_DEALS_LIB:
+            print_progress("Nintendo fallback library unavailable (install `nintendeals`).")
+            return []
+
+        try:
+            keyword = (keyword or "").strip()
+            if keyword:
+                games_iter = nintendo_noa.search.search_switch_games(keyword)
+                games = list(itertools.islice(games_iter, 120))
+            else:
+                games_iter = nintendo_noa.list_switch_games()
+                games = list(itertools.islice(games_iter, 250))
+
+            if not games:
+                return []
+
+            prices_by_nsuid = dict(nintendo_prices.get_prices(games, country="US"))
+            deals = []
+            for game in games:
+                nsuid = str(getattr(game, "nsuid", "") or "")
+                if not nsuid:
+                    continue
+                price = prices_by_nsuid.get(nsuid)
+                if not price or not getattr(price, "on_sale", False):
+                    continue
+
+                sale_value = getattr(price, "sale_value", None)
+                regular_value = getattr(price, "value", None)
+                if sale_value is None:
+                    continue
+
+                discount_pct = int(getattr(price, "sale_discount", 0) or 0)
+                discount = f"-{discount_pct}%"
+                original_price = f"${regular_value:.2f}" if regular_value else None
+                sale_price = f"${sale_value:.2f}"
+                sale_end = getattr(price, "sale_end", None)
+                slug = getattr(game, "slug", "") or ""
+                url = (
+                    f"https://www.nintendo.com/us/store/products/{slug}/"
+                    if slug else ""
+                )
+                if not url:
+                    continue
+
+                deals.append(
+                    {
+                        "name": getattr(game, "title", "Nintendo Deal"),
+                        "discount": discount,
+                        "price": sale_price,
+                        "original_price": original_price,
+                        "source": "Nintendo eShop US",
+                        "time_left": self._nintendo_time_left_text(sale_end),
+                        "description": (
+                            " ".join(str(getattr(game, "description", "") or "").split())
+                            or f"{getattr(game, 'title', 'This game')} is discounted on Nintendo eShop US."
+                        ),
+                        "steam_url": url,
+                        "tags": ["NintendoSwitch", "Nintendo"],
+                    }
+                )
+
+            deals = self._dedupe_deals_by_name(deals)
+            print_progress(
+                f"Found {len(deals)} Nintendo US discounted games via library"
+                + (f" for \"{keyword}\"" if keyword else "")
+            )
+            return deals[:count]
+        except Exception as e:
+            print_progress(f"Nintendo fallback library lookup failed: {e}")
+            return []
+
+    @staticmethod
+    def _time_left_text_from_datetime(end_dt):
+        if end_dt.tzinfo is None:
+            now = datetime.now()
+        else:
+            now = datetime.now(end_dt.tzinfo)
+        remaining = end_dt - now
+        if remaining.total_seconds() <= 0:
+            return "ended"
+
+        total_hours = int(remaining.total_seconds() // 3600)
+        total_days = total_hours // 24
+        if total_days >= 1:
+            return f"{total_days}d left"
+        if total_hours >= 2:
+            return f"{total_hours} hours left"
+        total_minutes = int(remaining.total_seconds() // 60)
+        if total_minutes >= 2:
+            return f"{total_minutes} minutes left"
+        return "ending soon"
+
+    @classmethod
+    def _time_left_from_unix(cls, unix_seconds):
+        if not unix_seconds:
+            return None
+        try:
+            end_dt = datetime.fromtimestamp(int(unix_seconds))
+        except Exception:
+            return None
+        return cls._time_left_text_from_datetime(end_dt)
+
+    @classmethod
+    def _nintendo_time_left_text(cls, sale_end):
+        if not sale_end:
+            return None
+
+        end_dt = None
+        if isinstance(sale_end, datetime):
+            end_dt = sale_end
+        elif isinstance(sale_end, str):
+            text = sale_end.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                end_dt = datetime.fromisoformat(text)
+            except Exception:
+                return None
+        else:
+            return None
+
+        return cls._time_left_text_from_datetime(end_dt)
+
+    def format_nintendo_deal_tweet(self, deal, max_length: int = TWEET_MAX_LENGTH) -> str:
+        name = deal["name"]
+        discount = deal["discount"]
+        price = deal["price"]
+        original_price = deal.get("original_price")
+        source = deal.get("source", "Nintendo eShop US")
+        time_left = deal.get("time_left")
+        description = deal.get("description", "")
+        url = deal["steam_url"]
+
+        price_line = price
+        if original_price and original_price != price:
+            price_line = f"{self._strikethrough(original_price)} {price}"
+
+        source_line = f"{price_line} | {source}"
+        if time_left:
+            source_line = f"{price_line} | {time_left} | {source}"
+
+        tags = "#NintendoDeals #NintendoSwitch #Gaming"
+        head = f"🎮{name} {discount} off!\n{source_line}\n\n"
+        tail = f"{url}\n{tags}"
+        room = max_length - len(head) - len(tail) - 2
+        if room > 0 and description:
+            description = self._truncate_words(description, room)
+            tweet = f"{head}{description}\n\n{tail}"
+        else:
+            tweet = f"{head}{tail}"
+        return self._fit_to_max_length(tweet, max_length)
+
     @staticmethod
     def _discount_percent_from_deal(deal):
         match = re.search(r'(\d+)', deal.get('discount', '') or '')
@@ -970,6 +1266,10 @@ class SteamDealDetector:
         random.shuffle(discovery_deals)
         unique_deals = high_signal_deals + discovery_deals
 
+        # Enrich main Steam list with sale countdown when we can map app IDs
+        # to Steam's featured-categories discount expiration timestamps.
+        self._attach_time_left_from_featured_api(unique_deals)
+
         # Fill in descriptions (real for the first few, generated for the rest).
         self._enrich_descriptions(unique_deals)
 
@@ -1003,12 +1303,47 @@ class SteamDealDetector:
             return f"https://store.steampowered.com/app/{app_match.group(1)}/"
         return url
 
+    @staticmethod
+    def _steam_app_id_from_url(url: str):
+        match = re.search(r'store\.steampowered\.com/app/(\d+)', url or '')
+        return int(match.group(1)) if match else None
+
+    def _attach_time_left_from_featured_api(self, deals):
+        try:
+            response = self.session.get(
+                "https://store.steampowered.com/api/featuredcategories/?cc=us&l=english",
+                timeout=15,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            return
+
+        expiration_by_app_id = {}
+        for item in ((data.get("specials") or {}).get("items") or []):
+            app_id = item.get("id")
+            expiration = item.get("discount_expiration")
+            if app_id and expiration:
+                expiration_by_app_id[int(app_id)] = expiration
+
+        for deal in deals:
+            if deal.get("time_left"):
+                continue
+            app_id = self._steam_app_id_from_url(deal.get("steam_url"))
+            if not app_id:
+                continue
+            expiration = expiration_by_app_id.get(app_id)
+            if not expiration:
+                continue
+            deal["time_left"] = self._time_left_from_unix(expiration)
+
     def format_deal_tweet(self, deal, max_length: int = TWEET_MAX_LENGTH) -> str:
         """Format a single deal into a tweet (max 280 characters by default)."""
         name = deal['name']
         discount = deal['discount']
         price = deal['price']
         original_price = deal.get('original_price')
+        time_left = deal.get('time_left')
         source = deal['source']
         description = deal.get('description', '')
         steam_url = self._trim_steam_url(deal['steam_url'])
@@ -1016,12 +1351,15 @@ class SteamDealDetector:
         price_line = price
         if original_price and original_price != price:
             price_line = f"{self._strikethrough(original_price)} {price}"
+        source_line = f"{price_line} | {source}"
+        if time_left:
+            source_line = f"{price_line} | {time_left} | {source}"
 
         def assemble(display_name: str, desc: str, extras) -> str:
             tags = "#SteamDeals #Gaming #Deals"
             if extras:
                 tags += " " + " ".join(extras)
-            head = f"🏷️{display_name} {discount} off!\n{price_line} | {source}\n\n"
+            head = f"🏷️{display_name} {discount} off!\n{source_line}\n\n"
             tail = f"{steam_url}\n{tags}"
             room = max_length - len(head) - len(tail) - 2
             if room > 0 and desc:

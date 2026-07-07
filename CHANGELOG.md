@@ -6,6 +6,21 @@ All notable changes to SteamDealBot will be documented in this file.
 
 - Add future changes here before tagging a new version.
 
+## [v2.1.4] - 07-07-2026
+
+### Added
+
+- Added a separate Nintendo US deals menu in the manual poster (`7. Nintendo US deals`) with optional keyword search.
+- Added `nintendeals` fallback integration so Nintendo US deals still work when the legacy Nintendo endpoint returns 404.
+- Added Nintendo deal countdown text (for example `2d left` / `40 hours left`) in tweet price/source lines when sale end data is available.
+- Added Steam deal countdown text in tweet price/source lines when sale end data is available from Steam APIs.
+
+### Changed
+
+- Moved `Exit` to option `8` so Nintendo deals can live on the main menu without mixing into Steam flows.
+- Changed Nintendo menu flow from one-shot pick list to an interactive browse menu (copy/next/search/refresh/back).
+- Aligned Nintendo keyword search copy flow with Steam search (supports `3`, `3,7`, and `3-5` pick patterns).
+
 ## [v2.1.3] - 04-07-2026
 
 ### Added

@@ -38,7 +38,7 @@ except Exception:
     pyperclip = None  # type: ignore
     _HAS_PYPERCLIP = False
 
-VERSION = "v2.1.3"
+VERSION = "v2.1.4"
 
 POSTED_HISTORY_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -436,16 +436,23 @@ def copy_collection_results(
     detector: SteamDealDetector,
     results: List[Dict],
     indices: List[int],
+    tweet_formatter=None,
+    track_posted: bool = True,
 ) -> bool:
+    if tweet_formatter is None:
+        tweet_formatter = detector.format_deal_tweet
+
     selected_deals = [results[index - 1] for index in indices]
 
     if len(selected_deals) == 1:
-        selected_tweet = detector.format_deal_tweet(selected_deals[0])
+        selected_tweet = tweet_formatter(selected_deals[0])
         copied = copy_to_clipboard(selected_tweet)
         preview_text = selected_tweet
         success_message = f"Pick #{indices[0]} copied to clipboard!"
     else:
-        preview_text = format_bulk_tweets(detector, selected_deals)
+        preview_text = ("\n\n" + "-" * 30 + "\n\n").join(
+            tweet_formatter(deal) for deal in selected_deals
+        )
         copied = copy_to_clipboard(preview_text)
         index_list = ", ".join(str(index) for index in indices)
         success_message = (
@@ -453,9 +460,11 @@ def copy_collection_results(
         )
 
     if copied:
-        mark_deals_posted(selected_deals)
+        if track_posted:
+            mark_deals_posted(selected_deals)
         themed_print(success_message, "success")
-        themed_print("Marked as posted for more variety on future refreshes.", "muted")
+        if track_posted:
+            themed_print("Marked as posted for more variety on future refreshes.", "muted")
     else:
         themed_print("Could not copy the selected pick(s) automatically.", "error")
         themed_print("Please manually copy the selected tweet(s) above if needed.", "warning")
@@ -471,8 +480,15 @@ def show_collection_copy_loop(
     detector: SteamDealDetector,
     title: str,
     results: List[Dict],
+    tweet_formatter=None,
+    track_posted: bool = True,
 ) -> None:
-    results, posted_count = deprioritize_posted_deals(results)
+    if tweet_formatter is None:
+        tweet_formatter = detector.format_deal_tweet
+
+    posted_count = 0
+    if track_posted:
+        results, posted_count = deprioritize_posted_deals(results)
     if not results:
         themed_print(f"No deals found for {title}.", "warning")
         return
@@ -498,7 +514,13 @@ def show_collection_copy_loop(
             themed_print("Invalid selection. Use numbers like 3, 3,7, or 3-5.", "error")
             continue
 
-        copy_collection_results(detector, results, indices)
+        copy_collection_results(
+            detector,
+            results,
+            indices,
+            tweet_formatter=tweet_formatter,
+            track_posted=track_posted,
+        )
         themed_print("Copy more from this collection, or press Enter to go back.", "muted")
 
 
@@ -826,6 +848,103 @@ def show_keyword_search_menu(detector: SteamDealDetector) -> None:
 
     show_collection_copy_loop(detector, f'Search results for "{keyword}"', results)
 
+
+def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
+    keyword = ""
+
+    def fetch_nintendo_deals(active_keyword: str):
+        themed_print("Fetching Nintendo eShop US discounted games...", "muted")
+        return detector.get_nintendo_us_deals(keyword=active_keyword, count=30)
+
+    results = fetch_nintendo_deals(keyword)
+    if not results:
+        themed_print("No Nintendo discounted games found right now.", "warning")
+        return
+
+    deal_index = 0
+    while True:
+        deal = results[deal_index]
+        tweet = detector.format_nintendo_deal_tweet(deal)
+
+        print_muted_label_value(f"\nNintendo Deal #{deal_index + 1}", deal["name"])
+        print_muted_label_value("Tweet", f"{len(tweet)}/{TWEET_MAX_LENGTH} characters")
+        print()
+        themed_print("-" * 30, "muted")
+        print_tweet_preview(tweet)
+        themed_print("-" * 30, "muted")
+
+        choice = input(
+            "\n"
+            + color_text("Nintendo menu:", "muted")
+            + "\n"
+            + format_menu_option(1, "Copy this Nintendo tweet")
+            + "\n"
+            + format_menu_option(2, "Show next Nintendo deal")
+            + "\n"
+            + format_menu_option(3, "Search Nintendo keyword")
+            + "\n"
+            + format_menu_option(4, "Refresh Nintendo deals")
+            + "\n"
+            + format_menu_option(5, "Back to Steam menu")
+            + "\n"
+            + color_text("Choice (1-5, Enter=next): ", "label")
+        ).strip()
+
+        if choice == "1":
+            if copy_to_clipboard(tweet):
+                themed_print("Nintendo tweet copied to clipboard!", "success")
+            else:
+                themed_print("Could not copy that Nintendo tweet automatically.", "error")
+                themed_print("Please manually copy the selected tweet above if needed.", "warning")
+            themed_input("\nPress Enter to continue...", "muted")
+            if deal_index < len(results) - 1:
+                deal_index += 1
+            continue
+
+        if choice == "" or choice == "2":
+            if deal_index < len(results) - 1:
+                deal_index += 1
+            else:
+                themed_print("Reached the last Nintendo deal in this list.", "warning")
+            continue
+
+        if choice == "3":
+            new_keyword = themed_input(
+                "\nNintendo keyword (Enter for all deals): "
+            ).strip()
+            new_results = fetch_nintendo_deals(new_keyword)
+            if not new_results:
+                themed_print("No Nintendo discounted games found for that search.", "warning")
+                continue
+            keyword = new_keyword
+            results = new_results
+            deal_index = 0
+            search_title = "Nintendo US discounted deals"
+            if keyword:
+                search_title += f' for "{keyword}"'
+            show_collection_copy_loop(
+                detector,
+                search_title,
+                results,
+                tweet_formatter=detector.format_nintendo_deal_tweet,
+                track_posted=False,
+            )
+            continue
+
+        if choice == "4":
+            refreshed_results = fetch_nintendo_deals(keyword)
+            if not refreshed_results:
+                themed_print("No Nintendo discounted games found on refresh.", "warning")
+                continue
+            results = refreshed_results
+            deal_index = 0
+            continue
+
+        if choice == "5":
+            return
+
+        themed_print("Invalid choice. Please try again.", "error")
+
 def main():
     print_banner()
 
@@ -885,9 +1004,11 @@ def main():
                 + "\n"
                 + format_menu_option(6, "Search by keyword")
                 + "\n"
-                + format_menu_option(7, "Exit")
+                + format_menu_option(7, "Nintendo US deals")
                 + "\n"
-                + color_text("Choice (1-7, Enter=next): ", "label")
+                + format_menu_option(8, "Exit")
+                + "\n"
+                + color_text("Choice (1-8, Enter=next): ", "label")
             ).strip()
             
             if choice == '1':
@@ -943,6 +1064,11 @@ def main():
                 continue
 
             elif choice == '7':
+                show_nintendo_deals_menu(detector)
+                themed_input("\nPress Enter to continue...", "muted")
+                continue
+
+            elif choice == '8':
                 themed_print("Goodbye!", "success")
                 return
                 

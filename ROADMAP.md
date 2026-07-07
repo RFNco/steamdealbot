@@ -1,6 +1,6 @@
 # SteamDealBot Roadmap
 
-Future ideas and improvements to consider after v2.1.3.
+Future ideas and improvements to consider after v2.1.4.
 
 ## Content Quality
 
@@ -35,9 +35,19 @@ Future ideas and improvements to consider after v2.1.3.
 
 ## New Sources
 
-- [ ] Add Nintendo/eShop deal support when a reliable API or source is chosen.
+- [x] Add Nintendo/eShop deal support when a reliable API or source is chosen.
 - [ ] Explore Epic Games Store, GOG, and Humble Bundle deal sources.
 - [ ] Add source-specific tweet templates.
+
+## News & Trends
+
+- [ ] Add a gaming news pipeline using reliable RSS/Atom sources (official blogs + major outlets).
+- [ ] Normalize fetched news fields (source, title, URL, published date, summary).
+- [ ] Add dedupe + cache for news items to avoid reposting the same headline too often.
+- [ ] Add a manual poster submenu for browsing and copying news-based tweet ideas.
+- [ ] Add non-AI headline-to-tweet templates with engagement variants (question, recap, hype).
+- [ ] Add source filters (official-only, platform-specific, all sources).
+- [ ] Add recency filters (last 6h, 24h, 3d) for timely posts.
 
 ## Reliability
 
