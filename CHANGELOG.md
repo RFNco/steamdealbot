@@ -6,6 +6,30 @@ All notable changes to SteamDealBot will be documented in this file.
 
 - Add future changes here before tagging a new version.
 
+---
+
+## [v2.1.5] - 10-07-2026
+
+### Added
+
+- Added `ANSI_COLORS` named palette in `manual_poster.py` so terminal colors are easier to pick by name instead of raw ANSI codes.
+- Added centralized `MENU_STYLES` for all manual poster menus, with separate Steam and Nintendo highlight maps.
+- Added `python manual_poster.py --preview-colors` to preview the palette and sample menus without fetching deals.
+- Added `STEAM_DEAL_COUNT` (default `35`) to tune how many Steam deals load in the main manual poster browse list.
+- Added short Nintendo eShop tweet links via regional NSUID (`https://ec.nintendo.com/US/en/titles/<nsuid>`), similar to trimmed Steam app URLs.
+
+### Changed
+
+- Reorganized the main manual poster menu: `3` Search, `4` Refresh, `5` Collections & ideas, `6` Nintendo US deals, `7` Copy 5 deals, `8` Exit.
+- Shortened menu labels to `Copy tweet`, `Show next`, and `Copy 5 deals` (Steam and Nintendo menus aligned).
+- Made `nintendeals` the primary Nintendo US deals source when installed, skipping the slow dead official sales API.
+- Reduced default Nintendo deal batch size (`NINTENDO_DEAL_COUNT`) for faster loads.
+- Reduced default Steam main browse list from 50 to 35 deals for a shorter, faster refresh.
+- Improved Nintendo refresh variety with batched `nintendeals` fetch and shuffled on-sale results.
+- Fixed Nintendo keyword search so the main browse list stays on the default feed after copying search picks.
+- Posted-game memory for Nintendo deals now keys by NSUID when available for more reliable **Posted** tracking.
+- Updated README with per-package `pip install` explanations, menu layout, Nintendo notes, terminal color customization, and keeping `.manual_poster_posted.json` when updating the manual poster.
+
 ## [v2.1.4] - 07-07-2026
 
 ### Added

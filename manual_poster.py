@@ -28,7 +28,7 @@ import os
 import random
 import shutil
 import subprocess
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Try to import pyperclip optionally; we provide fallbacks below
 try:
@@ -38,7 +38,7 @@ except Exception:
     pyperclip = None  # type: ignore
     _HAS_PYPERCLIP = False
 
-VERSION = "v2.1.4"
+VERSION = "v2.1.5"
 
 POSTED_HISTORY_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -68,21 +68,76 @@ BULK_COPY_COUNT = 5
 TWEET_IDEA_COUNT = 5
 TWEET_IDEA_SEPARATOR = "\n\n" + "-" * 30 + "\n\n"
 COLOR_ENABLED = os.environ.get("STEAMDEALBOT_NO_COLOR") != "1"
-THEME = {
-    # Standard ANSI colors use the user's terminal palette, so they match
-    # TerminalColors-style themes better than raw truecolor hex on limited shells.
-    "banner": "\033[93m",
-    "title": "\033[96m",
-    "label": "\033[93m",
-    "value": "\033[97m",
-    "muted": "\033[90m",
-    "tweet": "\033[93m",
-    "success": "\033[92m",
-    "warning": "\033[33m",
-    "error": "\033[91m",
-    "reset": "\033[0m",
+
+# Named ANSI foreground colors — pick from here when editing THEME below.
+# Codes follow the standard 16-color terminal palette (actual shade depends on your theme).
+ANSI_COLORS = {
+  # 30-37: normal
+    "black": "\033[30m",          # black
+    "red": "\033[31m",            # red
+    "green": "\033[32m",          # green
+    "yellow": "\033[33m",         # yellow / amber
+    "blue": "\033[34m",           # blue
+    "magenta": "\033[35m",        # magenta / purple
+    "cyan": "\033[36m",           # cyan
+    "white": "\033[37m",          # white
+  # 90-97: bright (common in modern terminals)
+    "gray": "\033[90m",           # bright black → usually gray
+    "bright_red": "\033[91m",    # bright red
+    "bright_green": "\033[92m",   # bright green
+    "bright_yellow": "\033[93m",  # bright yellow
+    "bright_blue": "\033[94m",    # bright blue
+    "bright_magenta": "\033[95m", # bright magenta
+    "bright_cyan": "\033[96m",    # bright cyan
+    "bright_white": "\033[97m",   # bright white
+    "reset": "\033[0m",            # reset to default
 }
 
+THEME = {
+    # UI role → ANSI_COLORS name (change the value to any key from ANSI_COLORS above)
+    "banner": ANSI_COLORS["bright_yellow"],   # ASCII banner lines
+    "title": ANSI_COLORS["bright_cyan"],      # section titles, Manual Poster header
+    "label": ANSI_COLORS["bright_yellow"],    # input prompts
+    "value": ANSI_COLORS["bright_white"],     # main body text, game names
+    "muted": ANSI_COLORS["gray"],             # hints, separators, deal numbers
+    "tweet": ANSI_COLORS["bright_yellow"],    # tweet preview first line
+    "success": ANSI_COLORS["bright_green"],   # copied / OK messages
+    "warning": ANSI_COLORS["yellow"],         # Posted tag, soft warnings
+    "error": ANSI_COLORS["bright_red"],       # errors
+    "reset": ANSI_COLORS["reset"],
+}
+
+# Menu colors and highlights — change styles here for every manual poster menu.
+# Values must be keys from THEME above (which point at ANSI_COLORS names).
+MENU_STYLES = {
+    "header": "muted",       # e.g. "What would you like to do?" → gray
+    "prompt": "label",       # e.g. "Choice (1-8...)" → bright yellow
+    "number": "muted",       # e.g. "1. " → gray
+    "option": "value",       # default option label → bright white
+    "description": "muted",  # trailing hints → gray
+    # Per-menu option colors (THEME role names — see ANSI_COLORS for the actual shade)
+    "highlights": {
+        "steam": {
+            1: "warning",    # Copy tweet
+          # 2: "warning",   # Show next
+            3: "title",      # Search by keyword
+            4: "success",    # Refresh
+            
+        },
+        "nintendo": {
+            1: "warning",    # Copy tweet
+          #  2: "warning",   # Show next
+            3: "title",      # Search by keyword
+            4: "success",    # Refresh
+            5: "muted",      # Back to Steam
+        },
+    },
+}
+
+# Reusable themed tweet ideas (Collections & ideas). Before each version tag, add or
+# swap a few lines in TWEET_IDEA_THEME_EXTRAS, then bump TWEET_IDEA_LAST_ROLLED_VERSION
+# (and the matching version on ROADMAP.md) to match the release you are tagging.
+TWEET_IDEA_LAST_ROLLED_VERSION = "v2.1.5"
 TWEET_IDEA_THEMES = {
     "1": (
         "Steam",
@@ -142,6 +197,9 @@ TWEET_IDEA_THEME_EXTRAS = {
         "The best Steam recommendations usually come from players, not algorithms. What should people check out? #Steam",
         "Deal hunters, what makes a Steam discount an instant buy for you? #SteamDeals #PCGaming",
         "Steam sale math is different: if it is 80% off, it almost feels responsible. Almost. #SteamDeals #Gaming",
+        "New week, new Steam deals: are you hunting discounts or finally clearing the backlog? #Steam #PCGaming",
+        "That moment when a wishlisted game finally hits the price you wanted. What are you waiting on? #SteamDeals",
+        "Steam players: buy the comfort replay or gamble on something totally new? #Steam #Gaming",
     ],
     "2": [
         "Nintendo-style fun is all about games you can pick up anytime and still smile. What has that energy for you? #Nintendo",
@@ -162,6 +220,9 @@ TWEET_IDEA_THEME_EXTRAS = {
         "The best couch gaming memories usually start with 'one quick round.' What game owns that category? #NintendoSwitch",
         "Portable gaming question: what game is perfect for playing in short breaks? #Nintendo #Gaming",
         "Nintendo energy is when a game makes you smile before you even realize you played for an hour. #NintendoSwitch",
+        "Rainy day, cozy game, no plans to leave the couch. What is your perfect Switch combo? #Nintendo #Gaming",
+        "Some Switch games are worth keeping installed forever. What never gets deleted from yours? #NintendoSwitch",
+        "Nintendo fans: quick arcade session or settle in for a long RPG night? #Nintendo #Gaming",
     ],
     "3": [
         "Gaming backlog status: organized library or beautiful chaos? #Gaming #GameDeals",
@@ -182,6 +243,9 @@ TWEET_IDEA_THEME_EXTRAS = {
         "The best games make time disappear. Which one did that for you recently? #Gaming",
         "Gaming hot take: a short great game can be better than a huge unfinished one. Agree? #GamingCommunity",
         "What game deserves more attention than it gets? #Gaming #GameDeals",
+        "Weekend gaming plan: one new pickup, one old favorite, and zero guilt about the backlog. #Gaming",
+        "What discount percentage makes you stop thinking and start buying? #GameDeals #GamingCommunity",
+        "Gaming check-in: what are you playing tonight and why did you pick it? #Gaming",
     ],
 }
 for theme_key, extra_templates in TWEET_IDEA_THEME_EXTRAS.items():
@@ -214,13 +278,63 @@ def print_muted_label_value(label: str, value: str) -> None:
     print(color_text(f"{label}: {value}", "muted"))
 
 
-def format_menu_option(number: int, text: str) -> str:
-    option_style = {
-        1: "tweet",
-        2: "title",
-        4: "title",
-    }.get(number, "value")
-    return color_text(f"{number}. ", "muted") + color_text(text, option_style)
+def menu_option_style(
+    number: int,
+    menu_type: str = "default",
+    style: Optional[str] = None,
+) -> str:
+    if style:
+        return style
+
+    highlights = MENU_STYLES["highlights"]
+    if menu_type in highlights:
+        return highlights[menu_type].get(number, MENU_STYLES["option"])
+    return highlights.get(number, MENU_STYLES["option"])
+
+
+def format_menu_option(
+    number: int,
+    text: str,
+    description: str = "",
+    style: Optional[str] = None,
+    menu_type: str = "default",
+) -> str:
+    option_style = menu_option_style(number, menu_type=menu_type, style=style)
+    line = (
+        color_text(f"{number}. ", MENU_STYLES["number"])
+        + color_text(text, option_style)
+    )
+    if description:
+        line += color_text(f" - {description}", MENU_STYLES["description"])
+    return line
+
+
+def prompt_menu_choice(
+    header: str,
+    options: List[tuple],
+    prompt: str,
+    menu_type: str = "default",
+) -> str:
+    """Build a numbered menu from (number, label) or (number, label, description) tuples."""
+    message = "\n" + color_text(header, MENU_STYLES["header"])
+    for option in options:
+        if len(option) == 2:
+            number, text = option
+            message += "\n" + format_menu_option(number, text, menu_type=menu_type)
+        else:
+            number, text, description = option
+            message += "\n" + format_menu_option(
+                number, text, description=description, menu_type=menu_type
+            )
+    message += "\n" + color_text(prompt, MENU_STYLES["prompt"])
+    return input(message).strip()
+
+
+def print_menu_section_header(title: str, subtitle: str = "") -> None:
+    themed_print(f"\n{title}", "title")
+    if subtitle:
+        themed_print(subtitle, MENU_STYLES["description"])
+    themed_print("-" * 30, "muted")
 
 def print_banner() -> None:
     signature = "©RFNco"
@@ -270,6 +384,9 @@ def print_tweet_idea(index: int, idea: str) -> None:
 
 
 def _deal_key(deal: Dict) -> str:
+    nsuid = str(deal.get("nsuid") or "").strip()
+    if nsuid.isdigit():
+        return f"nintendo:{nsuid}"
     steam_url = deal.get("steam_url", "")
     match = re.search(r"/app/(\d+)", steam_url)
     if match:
@@ -735,18 +852,15 @@ def show_deal_modes_menu(detector: SteamDealDetector) -> None:
     mode_keys = list(DEAL_MODE_CONFIGS.keys())
 
     while True:
-        themed_print("\nDeal modes:", "title")
-        themed_print("Build a thread from a focused sale slice.", "muted")
-        themed_print("-" * 30, "muted")
+        print_menu_section_header(
+            "Deal modes",
+            "Build a thread from a focused sale slice.",
+        )
         for index, mode_key in enumerate(mode_keys, 1):
             config = DEAL_MODE_CONFIGS[mode_key]
-            print(
-                color_text(f"{index}. ", "muted")
-                + color_text(config["label"], "value")
-                + color_text(f" - {config['blurb']}", "muted")
-            )
+            print(format_menu_option(index, config["label"], description=config["blurb"]))
 
-        choice = themed_input("\nChoose a deal mode (Enter=back): ").strip()
+        choice = themed_input("\nChoose a deal mode (Enter=back): ", MENU_STYLES["prompt"]).strip()
         if not choice:
             return
 
@@ -770,18 +884,15 @@ def show_deal_categories_menu(detector: SteamDealDetector) -> None:
     category_keys = list(DEAL_CATEGORY_CONFIGS.keys())
 
     while True:
-        themed_print("\nCategories:", "title")
-        themed_print("Browse discounted games by genre or price.", "muted")
-        themed_print("-" * 30, "muted")
+        print_menu_section_header(
+            "Categories",
+            "Browse discounted games by genre or price.",
+        )
         for index, category_key in enumerate(category_keys, 1):
             config = DEAL_CATEGORY_CONFIGS[category_key]
-            print(
-                color_text(f"{index}. ", "muted")
-                + color_text(config["label"], "value")
-                + color_text(f" - {config['blurb']}", "muted")
-            )
+            print(format_menu_option(index, config["label"], description=config["blurb"]))
 
-        choice = themed_input("\nChoose a category (Enter=back): ").strip()
+        choice = themed_input("\nChoose a category (Enter=back): ", MENU_STYLES["prompt"]).strip()
         if not choice:
             return
 
@@ -802,26 +913,18 @@ def show_deal_categories_menu(detector: SteamDealDetector) -> None:
 
 
 def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> None:
-    while True:
-        themed_print("\nCollections & ideas:", "title")
-        themed_print("-" * 30, "muted")
-        print(
-            color_text("1. ", "muted")
-            + color_text("Themed tweet ideas", "value")
-            + color_text(" - engagement posts using current deals", "muted")
-        )
-        print(
-            color_text("2. ", "muted")
-            + color_text("Deal modes", "value")
-            + color_text(" - big names, indies, hidden gems, deep discounts", "muted")
-        )
-        print(
-            color_text("3. ", "muted")
-            + color_text("Categories", "value")
-            + color_text(" - RPG, horror, co-op, cozy, strategy, under $5", "muted")
-        )
+    collections_options = [
+        (1, "Themed tweet ideas", "engagement posts using current deals"),
+        (2, "Deal modes", "big names, indies, hidden gems, deep discounts"),
+        (3, "Categories", "RPG, horror, co-op, cozy, strategy, under $5"),
+    ]
 
-        choice = themed_input("\nChoose an option (Enter=back): ").strip()
+    while True:
+        print_menu_section_header("Collections & ideas")
+        for number, text, description in collections_options:
+            print(format_menu_option(number, text, description=description))
+
+        choice = themed_input("\nChoose an option (Enter=back): ", MENU_STYLES["prompt"]).strip()
         if not choice:
             return
 
@@ -850,13 +953,11 @@ def show_keyword_search_menu(detector: SteamDealDetector) -> None:
 
 
 def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
-    keyword = ""
-
     def fetch_nintendo_deals(active_keyword: str):
         themed_print("Fetching Nintendo eShop US discounted games...", "muted")
-        return detector.get_nintendo_us_deals(keyword=active_keyword, count=30)
+        return detector.get_nintendo_us_deals(keyword=active_keyword)
 
-    results = fetch_nintendo_deals(keyword)
+    results = fetch_nintendo_deals("")
     if not results:
         themed_print("No Nintendo discounted games found right now.", "warning")
         return
@@ -873,22 +974,18 @@ def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
         print_tweet_preview(tweet)
         themed_print("-" * 30, "muted")
 
-        choice = input(
-            "\n"
-            + color_text("Nintendo menu:", "muted")
-            + "\n"
-            + format_menu_option(1, "Copy this Nintendo tweet")
-            + "\n"
-            + format_menu_option(2, "Show next Nintendo deal")
-            + "\n"
-            + format_menu_option(3, "Search Nintendo keyword")
-            + "\n"
-            + format_menu_option(4, "Refresh Nintendo deals")
-            + "\n"
-            + format_menu_option(5, "Back to Steam menu")
-            + "\n"
-            + color_text("Choice (1-5, Enter=next): ", "label")
-        ).strip()
+        choice = prompt_menu_choice(
+            "Nintendo menu:",
+            [
+                (1, "Copy tweet"),
+                (2, "Show next"),
+                (3, "Search by keyword"),
+                (4, "Refresh"),
+                (5, "Back to Steam"),
+            ],
+            "Choice (1-5, Enter=next): ",
+            menu_type="nintendo",
+        )
 
         if choice == "1":
             if copy_to_clipboard(tweet):
@@ -916,23 +1013,20 @@ def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
             if not new_results:
                 themed_print("No Nintendo discounted games found for that search.", "warning")
                 continue
-            keyword = new_keyword
-            results = new_results
-            deal_index = 0
             search_title = "Nintendo US discounted deals"
-            if keyword:
-                search_title += f' for "{keyword}"'
+            if new_keyword:
+                search_title += f' for "{new_keyword}"'
             show_collection_copy_loop(
                 detector,
                 search_title,
-                results,
+                new_results,
                 tweet_formatter=detector.format_nintendo_deal_tweet,
                 track_posted=False,
             )
             continue
 
         if choice == "4":
-            refreshed_results = fetch_nintendo_deals(keyword)
+            refreshed_results = fetch_nintendo_deals("")
             if not refreshed_results:
                 themed_print("No Nintendo discounted games found on refresh.", "warning")
                 continue
@@ -944,6 +1038,55 @@ def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
             return
 
         themed_print("Invalid choice. Please try again.", "error")
+
+def preview_theme_colors() -> None:
+    """Print palette + sample menus — fast way to check color edits without fetching deals."""
+    themed_print("ANSI color palette", "title")
+    themed_print("-" * 30, "muted")
+    for name in ANSI_COLORS:
+        if name == "reset":
+            continue
+        print(f"{ANSI_COLORS[name]}{name:16}{ANSI_COLORS['reset']}")
+
+    themed_print("\nTHEME roles", "title")
+    themed_print("-" * 30, "muted")
+    for role in THEME:
+        if role == "reset":
+            continue
+        themed_print(f"  {role}", role)
+
+    themed_print("\nSample Steam menu", "title")
+    themed_print("-" * 30, "muted")
+    print(color_text("What would you like to do?", MENU_STYLES["header"]))
+    for number, text in (
+        (1, "Copy tweet"),
+        (2, "Show next"),
+        (3, "Search by keyword"),
+        (4, "Refresh"),
+        (5, "Collections & ideas"),
+        (6, "Nintendo US deals"),
+    ):
+        print(format_menu_option(number, text, menu_type="steam"))
+
+    themed_print("\nSample Nintendo menu", "title")
+    themed_print("-" * 30, "muted")
+    print(color_text("Nintendo menu:", MENU_STYLES["header"]))
+    for number, text in (
+        (1, "Copy tweet"),
+        (2, "Show next"),
+        (3, "Search by keyword"),
+        (4, "Refresh"),
+        (5, "Back to Steam"),
+    ):
+        print(format_menu_option(number, text, menu_type="nintendo"))
+
+    print()
+    themed_print(
+        "Edit ANSI_COLORS / THEME / MENU_STYLES, save, then run this preview again.",
+        "muted",
+    )
+    themed_print("Command: python manual_poster.py --preview-colors", "muted")
+
 
 def main():
     print_banner()
@@ -988,28 +1131,21 @@ def main():
             themed_print("-" * 30, "muted")
             
             # Ask user what to do
-            choice = input(
-                "\n"
-                + color_text("What would you like to do?", "muted")
-                + "\n"
-                + format_menu_option(1, "Copy this tweet")
-                + "\n"
-                + format_menu_option(2, "Show next deal")
-                + "\n"
-                + format_menu_option(3, f"Copy next {BULK_COPY_COUNT} deals")
-                + "\n"
-                + format_menu_option(4, "Collections & ideas")
-                + "\n"
-                + format_menu_option(5, "Refresh")
-                + "\n"
-                + format_menu_option(6, "Search by keyword")
-                + "\n"
-                + format_menu_option(7, "Nintendo US deals")
-                + "\n"
-                + format_menu_option(8, "Exit")
-                + "\n"
-                + color_text("Choice (1-8, Enter=next): ", "label")
-            ).strip()
+            choice = prompt_menu_choice(
+                "What would you like to do?",
+                [
+                    (1, "Copy tweet"),
+                    (2, "Show next"),
+                    (3, "Search by keyword"),
+                    (4, "Refresh"),
+                    (5, "Collections & ideas"),
+                    (6, "Nintendo US deals"),
+                    (7, f"Copy {BULK_COPY_COUNT} deals"),
+                    (8, "Exit"),
+                ],
+                "Choice (1-8, Enter=next): ",
+                menu_type="steam",
+            )
             
             if choice == '1':
                 if copy_to_clipboard(tweet):
@@ -1032,6 +1168,25 @@ def main():
                 continue
                 
             elif choice == '3':
+                show_keyword_search_menu(detector)
+                themed_input("\nPress Enter to continue...", "muted")
+                continue
+
+            elif choice == '4':
+                refresh_requested = True
+                break
+                
+            elif choice == '5':
+                show_collections_menu(detector, deals)
+                themed_input("\nPress Enter to continue...", "muted")
+                continue
+
+            elif choice == '6':
+                show_nintendo_deals_menu(detector)
+                themed_input("\nPress Enter to continue...", "muted")
+                continue
+
+            elif choice == '7':
                 bulk_deals = deals[deal_index:deal_index + BULK_COPY_COUNT]
                 bulk_tweets = format_bulk_tweets(detector, bulk_deals)
 
@@ -1048,25 +1203,6 @@ def main():
 
                 themed_input("\nPress Enter to continue...", "muted")
                 deal_index += len(bulk_deals)
-
-            elif choice == '4':
-                show_collections_menu(detector, deals)
-                themed_input("\nPress Enter to continue...", "muted")
-                continue
-
-            elif choice == '5':
-                refresh_requested = True
-                break
-                
-            elif choice == '6':
-                show_keyword_search_menu(detector)
-                themed_input("\nPress Enter to continue...", "muted")
-                continue
-
-            elif choice == '7':
-                show_nintendo_deals_menu(detector)
-                themed_input("\nPress Enter to continue...", "muted")
-                continue
 
             elif choice == '8':
                 themed_print("Goodbye!", "success")
@@ -1086,10 +1222,16 @@ def main():
                 break
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        themed_print("\n\nGoodbye!", "success")
-    except Exception as e:
-        themed_print(f"\nError: {e}", "error")
-        themed_print("Please check your internet connection and try again.", "warning")
+    if len(sys.argv) > 1 and sys.argv[1] in ("--preview-colors", "--preview-theme"):
+        try:
+            preview_theme_colors()
+        except KeyboardInterrupt:
+            themed_print("\n", "muted")
+    else:
+        try:
+            main()
+        except KeyboardInterrupt:
+            themed_print("\n\nGoodbye!", "success")
+        except Exception as e:
+            themed_print(f"\nError: {e}", "error")
+            themed_print("Please check your internet connection and try again.", "warning")

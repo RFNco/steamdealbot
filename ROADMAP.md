@@ -1,6 +1,8 @@
 # SteamDealBot Roadmap
 
-Future ideas and improvements to consider after v2.1.4.
+**Latest tagged release:** v2.1.4 · **Next release (this commit):** v2.1.5 — update this line when you tag.
+
+Future ideas and improvements to consider after v2.1.5.
 
 ## Content Quality
 
@@ -14,13 +16,16 @@ Future ideas and improvements to consider after v2.1.4.
 
 - [ ] Add selectable tweet styles: short hype, informative, question/poll, indie spotlight, big discount alert.
 - [ ] Add optional engagement lines like "Would you grab this?" or "Backlog problem or instant buy?"
-- [ ] Add more reusable templates for Steam, Nintendo, and general gaming posts.
+- [x] Add more reusable templates for Steam, Nintendo, and general gaming posts (`TWEET_IDEA_THEMES` / `TWEET_IDEA_THEME_EXTRAS` in `manual_poster.py`). **Tweet ideas last rolled: v2.1.5**
 - [ ] Add optional AI rewrite mode for fresh wording while keeping the app usable without AI.
+
+**Per-release habit:** before tagging a new version, add, update, or swap a few tweet idea lines in `TWEET_IDEA_THEME_EXTRAS`, then bump **Tweet ideas last rolled** above (and `TWEET_IDEA_LAST_ROLLED_VERSION` in `manual_poster.py`) to match the version you are tagging.
 
 ## Manual Poster Workflow
 
 - [x] Add "mark as posted" after copying a tweet.
 - [x] Save copied/posted tweets with date, game name, price, and URL.
+- [x] Centralize manual poster terminal/menu colors (`ANSI_COLORS`, `THEME`, `MENU_STYLES`) and add `--preview-colors`.
 - [ ] Add a daily posting mix suggestion, for example 2 popular games, 2 indie games, and 1 engagement tweet.
 - [ ] Add a queue view for prepared tweets.
 - [ ] Add export to a text file for scheduled posting.
@@ -36,6 +41,7 @@ Future ideas and improvements to consider after v2.1.4.
 ## New Sources
 
 - [x] Add Nintendo/eShop deal support when a reliable API or source is chosen.
+- [x] Use short Nintendo eShop links in tweets (`ec.nintendo.com/.../titles/<nsuid>`).
 - [ ] Explore Epic Games Store, GOG, and Humble Bundle deal sources.
 - [ ] Add source-specific tweet templates.
 

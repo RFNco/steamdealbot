@@ -35,6 +35,8 @@ def print_progress(message):
 # every refresh (thousands of deals are available, not just the curated ~10).
 STEAM_SEARCH_RESULTS_URL = "https://store.steampowered.com/search/results/"
 NINTENDO_US_SALES_URL = "https://ec.nintendo.com/api/US/en/search/sales"
+STEAM_DEAL_COUNT = 35
+NINTENDO_DEAL_COUNT = 10
 # How many descriptions to enrich per refresh (each one is an extra page load).
 DESCRIPTION_ENRICH_LIMIT = 12
 # Keep most manual-poster results near Steam's high-signal pages so the feed
@@ -650,34 +652,7 @@ class SteamDealDetector:
         print_progress(f"Found {len(unique_deals)} discounted search results for \"{keyword}\"")
         return unique_deals[:count]
 
-    def get_nintendo_us_deals(self, keyword="", count=30):
-        """Get discounted Nintendo eShop US deals (separate from Steam)."""
-        params = {
-            "count": max(1, min(count, 100)),
-            "offset": 0,
-        }
-        keyword = (keyword or "").strip()
-        if keyword:
-            # Keep both for compatibility with endpoint variants.
-            params["q"] = keyword
-            params["query"] = keyword
-
-        try:
-            response = self.session.get(
-                NINTENDO_US_SALES_URL, params=params, timeout=20
-            )
-            response.raise_for_status()
-            data = response.json()
-        except Exception as e:
-            print_progress(f"Nintendo US deals endpoint unavailable: {e}")
-            return self._get_nintendo_us_deals_from_library(keyword=keyword, count=count)
-
-        items = []
-        if isinstance(data, dict):
-            items = data.get("items") or data.get("contents") or data.get("results") or []
-        if not isinstance(items, list):
-            items = []
-
+    def _parse_nintendo_sales_items(self, items):
         deals = []
         for item in items:
             if not isinstance(item, dict):
@@ -723,7 +698,6 @@ class SteamDealDetector:
                     or sale.get("sale_end")
                 )
             if sale_value is None:
-                # Try generic fallback fields.
                 try:
                     sale_value = float(item.get("sale_price") or item.get("price"))
                 except Exception:
@@ -753,6 +727,8 @@ class SteamDealDetector:
             )
             description = " ".join(str(description).split())
 
+            nsuid = str(item.get("nsuid") or item.get("ns_uid") or "").strip()
+
             deals.append(
                 {
                     "name": name,
@@ -760,97 +736,164 @@ class SteamDealDetector:
                     "price": price,
                     "original_price": original_price,
                     "source": "Nintendo eShop US",
-                        "time_left": self._nintendo_time_left_text(sale_end_text),
+                    "time_left": self._nintendo_time_left_text(sale_end_text),
                     "description": description,
                     "steam_url": url,
+                    "nsuid": nsuid,
                     "tags": ["NintendoSwitch", "Nintendo"],
                 }
             )
+        return deals
 
-        if keyword:
-            keyword_lower = keyword.lower()
-            deals = [d for d in deals if keyword_lower in d["name"].lower()]
-
+    def _finalize_nintendo_deal_list(self, deals, count=NINTENDO_DEAL_COUNT, keyword=""):
         deals = self._dedupe_deals_by_name(deals)
-        if not deals:
-            return self._get_nintendo_us_deals_from_library(keyword=keyword, count=count)
+        if not keyword and len(deals) > 1:
+            random.shuffle(deals)
         print_progress(
-            f"Found {len(deals)} Nintendo US discounted games"
+            f"Found {len(deals[:count])} Nintendo US discounted games"
             + (f" for \"{keyword}\"" if keyword else "")
         )
         return deals[:count]
 
-    def _get_nintendo_us_deals_from_library(self, keyword="", count=30):
-        """Fallback Nintendo US deals source via the nintendeals library."""
+    def _nintendo_deal_from_library_game(self, game, price):
+        sale_value = getattr(price, "sale_value", None)
+        regular_value = getattr(price, "value", None)
+        if sale_value is None:
+            return None
+
+        discount_pct = int(getattr(price, "sale_discount", 0) or 0)
+        slug = getattr(game, "slug", "") or ""
+        nsuid = str(getattr(game, "nsuid", "") or "").strip()
+        url = f"https://www.nintendo.com/us/store/products/{slug}/" if slug else ""
+        if not url:
+            return None
+
+        sale_end = getattr(price, "sale_end", None)
+        title = getattr(game, "title", "Nintendo Deal")
+        return {
+            "name": title,
+            "discount": f"-{discount_pct}%",
+            "price": f"${sale_value:.2f}",
+            "original_price": f"${regular_value:.2f}" if regular_value else None,
+            "source": "Nintendo eShop US",
+            "time_left": self._nintendo_time_left_text(sale_end),
+            "description": (
+                " ".join(str(getattr(game, "description", "") or "").split())
+                or f"{title} is discounted on Nintendo eShop US."
+            ),
+            "steam_url": url,
+            "nsuid": nsuid,
+            "tags": ["NintendoSwitch", "Nintendo"],
+        }
+
+    def get_nintendo_us_deals(self, keyword="", count=NINTENDO_DEAL_COUNT):
+        """Get discounted Nintendo eShop US deals (separate from Steam)."""
+        if _HAS_NINTENDO_DEALS_LIB:
+            return self._get_nintendo_us_deals_from_library(keyword=keyword, count=count)
+        return self._get_nintendo_us_deals_from_api(keyword=keyword, count=count)
+
+    def _get_nintendo_us_deals_from_api(self, keyword="", count=NINTENDO_DEAL_COUNT):
+        """Legacy Nintendo sales API (often unavailable). Used only without nintendeals."""
+        keyword = (keyword or "").strip()
+        pool_count = max(count * 4, 80)
+        fetch_count = min(100, pool_count)
+
+        if keyword:
+            params = {
+                "count": fetch_count,
+                "offset": 0,
+                "q": keyword,
+                "query": keyword,
+            }
+            offsets = [0]
+        else:
+            offsets = sorted({random.randint(0, offset) for offset in (0, 40, 120, 200, 320)})
+            params = {"count": fetch_count, "offset": 0}
+
+        all_items = []
+        try:
+            for offset in offsets:
+                request_params = dict(params)
+                request_params["offset"] = offset
+                response = self.session.get(
+                    NINTENDO_US_SALES_URL, params=request_params, timeout=5
+                )
+                response.raise_for_status()
+                data = response.json()
+                items = []
+                if isinstance(data, dict):
+                    items = data.get("items") or data.get("contents") or data.get("results") or []
+                if isinstance(items, list):
+                    all_items.extend(items)
+        except Exception as e:
+            print_progress(f"Nintendo US deals endpoint unavailable: {e}")
+            return []
+
+        deals = self._parse_nintendo_sales_items(all_items)
+
+        if keyword:
+            keyword_lower = keyword.lower()
+            deals = [deal for deal in deals if keyword_lower in deal["name"].lower()]
+
+        deals = self._dedupe_deals_by_name(deals)
+        if not deals:
+            return []
+        return self._finalize_nintendo_deal_list(deals, count=count, keyword=keyword)
+
+    def _get_nintendo_us_deals_from_library(self, keyword="", count=NINTENDO_DEAL_COUNT):
+        """Nintendo US deals via the nintendeals library (primary source)."""
         if not _HAS_NINTENDO_DEALS_LIB:
-            print_progress("Nintendo fallback library unavailable (install `nintendeals`).")
+            print_progress("Nintendo library unavailable (install `nintendeals`).")
             return []
 
         try:
             keyword = (keyword or "").strip()
+            deals = []
+            target_pool = max(count * 2, count + 12)
+
             if keyword:
-                games_iter = nintendo_noa.search.search_switch_games(keyword)
-                games = list(itertools.islice(games_iter, 120))
+                games = list(itertools.islice(
+                    nintendo_noa.search.search_switch_games(keyword), max(count * 4, 60)
+                ))
+                if not games:
+                    return []
+                prices_by_nsuid = dict(nintendo_prices.get_prices(games, country="US"))
+                for game in games:
+                    nsuid = str(getattr(game, "nsuid", "") or "")
+                    price = prices_by_nsuid.get(nsuid)
+                    if not price or not getattr(price, "on_sale", False):
+                        continue
+                    deal = self._nintendo_deal_from_library_game(game, price)
+                    if deal:
+                        deals.append(deal)
             else:
                 games_iter = nintendo_noa.list_switch_games()
-                games = list(itertools.islice(games_iter, 250))
+                skip = random.randint(0, 60)
+                games_iter = itertools.islice(games_iter, skip, None)
+                batch_size = 40
 
-            if not games:
-                return []
-
-            prices_by_nsuid = dict(nintendo_prices.get_prices(games, country="US"))
-            deals = []
-            for game in games:
-                nsuid = str(getattr(game, "nsuid", "") or "")
-                if not nsuid:
-                    continue
-                price = prices_by_nsuid.get(nsuid)
-                if not price or not getattr(price, "on_sale", False):
-                    continue
-
-                sale_value = getattr(price, "sale_value", None)
-                regular_value = getattr(price, "value", None)
-                if sale_value is None:
-                    continue
-
-                discount_pct = int(getattr(price, "sale_discount", 0) or 0)
-                discount = f"-{discount_pct}%"
-                original_price = f"${regular_value:.2f}" if regular_value else None
-                sale_price = f"${sale_value:.2f}"
-                sale_end = getattr(price, "sale_end", None)
-                slug = getattr(game, "slug", "") or ""
-                url = (
-                    f"https://www.nintendo.com/us/store/products/{slug}/"
-                    if slug else ""
-                )
-                if not url:
-                    continue
-
-                deals.append(
-                    {
-                        "name": getattr(game, "title", "Nintendo Deal"),
-                        "discount": discount,
-                        "price": sale_price,
-                        "original_price": original_price,
-                        "source": "Nintendo eShop US",
-                        "time_left": self._nintendo_time_left_text(sale_end),
-                        "description": (
-                            " ".join(str(getattr(game, "description", "") or "").split())
-                            or f"{getattr(game, 'title', 'This game')} is discounted on Nintendo eShop US."
-                        ),
-                        "steam_url": url,
-                        "tags": ["NintendoSwitch", "Nintendo"],
-                    }
-                )
+                while len(deals) < target_pool:
+                    batch = list(itertools.islice(games_iter, batch_size))
+                    if not batch:
+                        break
+                    prices_by_nsuid = dict(nintendo_prices.get_prices(batch, country="US"))
+                    for game in batch:
+                        nsuid = str(getattr(game, "nsuid", "") or "")
+                        price = prices_by_nsuid.get(nsuid)
+                        if not price or not getattr(price, "on_sale", False):
+                            continue
+                        deal = self._nintendo_deal_from_library_game(game, price)
+                        if deal:
+                            deals.append(deal)
 
             deals = self._dedupe_deals_by_name(deals)
-            print_progress(
-                f"Found {len(deals)} Nintendo US discounted games via library"
-                + (f" for \"{keyword}\"" if keyword else "")
+            return self._finalize_nintendo_deal_list(
+                deals,
+                count=count,
+                keyword=keyword,
             )
-            return deals[:count]
         except Exception as e:
-            print_progress(f"Nintendo fallback library lookup failed: {e}")
+            print_progress(f"Nintendo library lookup failed: {e}")
             return []
 
     @staticmethod
@@ -913,7 +956,7 @@ class SteamDealDetector:
         source = deal.get("source", "Nintendo eShop US")
         time_left = deal.get("time_left")
         description = deal.get("description", "")
-        url = deal["steam_url"]
+        url = self._trim_nintendo_url(deal["steam_url"], deal.get("nsuid"))
 
         price_line = price
         if original_price and original_price != price:
@@ -1103,7 +1146,7 @@ class SteamDealDetector:
 
         return self._finalize_collection_deals(deals, config['source_label'], count=count)
 
-    def get_random_specials(self, count=50):
+    def get_random_specials(self, count=STEAM_DEAL_COUNT):
         """Get a balanced set of specials favoring reviewed/popular games.
 
         Most samples come from Steam's top review/relevance pages. A smaller
@@ -1227,7 +1270,7 @@ class SteamDealDetector:
         game_name = game_name.strip()
         return game_name
     
-    def get_all_deals(self, sample_size=50):
+    def get_all_deals(self, sample_size=STEAM_DEAL_COUNT):
         """Get a varied set of Steam deals.
 
         Primary source is Steam's paginated search-results JSON with a random
@@ -1260,8 +1303,9 @@ class SteamDealDetector:
 
         # Keep the higher-signal popular/reviewed pages near the front, but
         # shuffle enough to avoid showing the exact same order every refresh.
-        high_signal_deals = unique_deals[:30]
-        discovery_deals = unique_deals[30:]
+        high_signal_count = max(1, (sample_size * 3) // 5)
+        high_signal_deals = unique_deals[:high_signal_count]
+        discovery_deals = unique_deals[high_signal_count:]
         random.shuffle(high_signal_deals)
         random.shuffle(discovery_deals)
         unique_deals = high_signal_deals + discovery_deals
@@ -1301,6 +1345,19 @@ class SteamDealDetector:
         app_match = re.search(r'store\.steampowered\.com/app/(\d+)', url)
         if app_match:
             return f"https://store.steampowered.com/app/{app_match.group(1)}/"
+        return url
+
+    @staticmethod
+    def _trim_nintendo_url(url: str, nsuid=None) -> str:
+        nsuid_text = str(nsuid or "").strip()
+        if not nsuid_text:
+            match = re.search(r"ec\.nintendo\.com/[^/]+/[^/]+/titles/(\d+)", url or "")
+            if match:
+                nsuid_text = match.group(1)
+        if nsuid_text.isdigit():
+            return f"https://ec.nintendo.com/US/en/titles/{nsuid_text}"
+        if url:
+            return url.split("?")[0]
         return url
 
     @staticmethod

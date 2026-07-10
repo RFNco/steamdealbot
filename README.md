@@ -12,12 +12,13 @@ A Twitter (𝕏) bot that automatically finds and posts Steam game deals with de
 - **Keyword Deal Search**: Search discounted Steam games by keyword and copy one or more matching tweets
 - **Deal Collections**: Browse deal modes and category collections for thread-style posting (RPG, under $5, deep discounts, and more)
 - **Posted-Game Memory**: Manual poster remembers copied games and surfaces fresher picks on refresh
+- **Nintendo US Deals (manual poster)**: Separate eShop US discount menu (requires `nintendeals`; see [Nintendo US deals menu](#nintendo-us-deals-menu))
 - **Automated Posting**: Runs every 6 hours via GitHub Actions
 - **Smart Deal Selection**: Finds the best deals with highest discount percentages
 - **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
 - **Easy Setup**: Simple installation and deployment process
 - **280-Character Tweets**: Each deal tweet is auto-fitted to 280 characters (configurable in `steam_deals.py`)
-- **Manual Poster CLI**: Terminal tool (v2.1.4) with ASCII banner, collections, posted-game memory, and copy-to-clipboard for 𝕏
+- **Manual Poster CLI**: Terminal tool (v2.1.5) with ASCII banner, collections, posted-game memory, and copy-to-clipboard for 𝕏
 
 ## Prerequisites
 
@@ -26,6 +27,7 @@ Before you begin, you'll need:
 1. A Twitter Developer Account
 2. Twitter API credentials (API Key, API Secret, Access Token, Access Token Secret, Bearer Token)
 3. Python 3.7+ installed locally (for testing)
+4. **`nintendeals`** (included in `requirements.txt`) if you want the manual poster **Nintendo US deals** menu
 
 ## Local Setup
 
@@ -38,9 +40,49 @@ cd steamdealbot
 
 ### 2. Install Dependencies
 
+**Full install (bot + manual poster + web UI + Nintendo):**
+
 ```bash
 pip install -r requirements.txt
 ```
+
+**What each package in `requirements.txt` does:**
+
+| Package | Install command | Used for |
+|--------|-----------------|----------|
+| `tweepy` | `pip install tweepy` | Posting tweets and verifying Twitter API credentials in `bot.py` |
+| `requests` | `pip install requests` | Fetching Steam deal pages, Nintendo data, and other HTTP requests |
+| `python-dotenv` | `pip install python-dotenv` | Loading Twitter API keys from your local `.env` file |
+| `beautifulsoup4` | `pip install beautifulsoup4` | Parsing Steam HTML (descriptions, tags, search results) |
+| `lxml` | `pip install lxml` | Faster HTML parser backend for BeautifulSoup (used by `bot.py` / full install) |
+| `flask` | `pip install flask` | Running the optional web interface (`web_interface.py`) |
+| `nintendeals` | `pip install nintendeals` | **Nintendo US deals** in the manual poster (primary working source) |
+
+**Manual poster extras (not in `requirements.txt`, but recommended):**
+
+| Package | Install command | Used for |
+|--------|-----------------|----------|
+| `pyperclip` | `pip install pyperclip` | One-key copy to clipboard in `manual_poster.py` (falls back to `clip` / `pbcopy` / Termux if missing) |
+
+**Steam-only manual poster (smaller install, no Twitter bot / web UI / Nintendo):**
+
+```bash
+pip install requests beautifulsoup4 pyperclip
+```
+
+- `requests` — load Steam deal/search JSON and store pages
+- `beautifulsoup4` — parse Steam result HTML
+- `pyperclip` — copy formatted tweets to your clipboard
+
+**Add Nintendo US deals** (install on top of the Steam-only set, or use full `requirements.txt`):
+
+```bash
+pip install nintendeals
+```
+
+- `nintendeals` — discounted US eShop games for menu option **6. Nintendo US deals**
+
+When `nintendeals` is installed, the manual poster uses it **directly** and skips Nintendo’s often-dead official sales API (faster loads).
 
 ### 3. Set Up Environment Variables
 
@@ -102,7 +144,7 @@ Since the free Twitter API tier doesn't allow posting tweets, you can use these 
 python manual_poster.py
 ```
 
-On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.4** header, then an interactive loop to browse deals.
+On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.5** header, then an interactive loop to browse deals.
 
 **Features:**
 - ASCII banner on startup (©RFNco) with manual poster version label
@@ -111,14 +153,37 @@ On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.4
 - Different games on every refresh (random sampling of Steam's specials)
 - Posted-game memory: copied tweets are saved locally and recently copied games move to the end for more variety
 - Amber `Posted` label on deal headers for recently copied games
-- Copy one tweet or bulk copy the next 5 deal tweets for faster posting
+- Copy one tweet or bulk **Copy 5 deals** for faster posting
 - Generate 5 themed tweet ideas, browse deal modes, or browse category collections under **Collections & ideas**
 - Search discounted Steam games by keyword, then copy one or more matching tweets without re-searching
-- Open a separate Nintendo US deals menu (optional keyword) and copy one selected Nintendo tweet
+- Open a separate Nintendo US deals menu (optional keyword) and copy Nintendo tweets — **requires `nintendeals`**
 - Steam and general gaming ideas can use current Steam deal data; Nintendo ideas stay template-only for now
 - Character count per tweet shown as `242/280` (see [Tweet length limit](#tweet-length-limit))
-- Menu: copy tweet, next deal, bulk copy, collections & ideas, refresh, Steam keyword search, Nintendo US deals, or exit
 - Clipboard fallbacks: pyperclip, Termux, macOS `pbcopy`, Windows `clip`
+- Customizable terminal colors via `ANSI_COLORS`, `THEME`, and `MENU_STYLES`; preview with `--preview-colors`
+
+**Main menu:**
+
+```text
+1. Copy tweet
+2. Show next
+3. Search by keyword
+4. Refresh
+5. Collections & ideas
+6. Nintendo US deals
+7. Copy 5 deals
+8. Exit
+```
+
+Steam and Nintendo both use **3 = Search** and **4 = Refresh** so the controls stay consistent across menus.
+
+**Preview terminal colors** (no deal fetch — useful while tuning `ANSI_COLORS` / `THEME` / `MENU_STYLES`):
+
+```bash
+python manual_poster.py --preview-colors
+```
+
+Save your edits, re-run the preview, then launch `python manual_poster.py` when it looks right. Colors load at startup only (not live while the poster is already running).
 
 ### Method 2: Desktop Shortcut (Windows)
 
@@ -151,8 +216,10 @@ pkg update -y && pkg install -y python termux-api git
 # Get the code
 git clone https://github.com/yourusername/steamdealbot.git
 cd steamdealbot
-# Install minimal deps (skip requirements.txt to avoid lxml build issues)
+# Minimal manual poster (Steam browse + clipboard)
 pip install requests beautifulsoup4 pyperclip
+# Optional: Nintendo US deals menu
+pip install nintendeals
 # Run
 python manual_poster.py
 ```
@@ -258,7 +325,7 @@ Use **Refresh** to fetch a fresh deal set before generating more ideas.
 
 ### Collections & ideas
 
-Option **4. Collections & ideas** opens a second menu for thread-style content:
+Option **5. Collections & ideas** opens a second menu for thread-style content:
 
 - **Themed tweet ideas**: Steam, Nintendo, or general gaming idea batches
 - **Deal modes**: big names, popular indies, hidden gems, deep discounts
@@ -268,10 +335,21 @@ Each collection shows a numbered list with discount and price, supports multi-pi
 
 ### Posted-game memory
 
-When you copy a deal tweet, the manual poster saves it to a local `.manual_poster_posted.json` file (gitignored). For the next 14 days:
+When you copy a deal tweet, the manual poster saves it to a local `.manual_poster_posted.json` file next to `manual_poster.py` (gitignored). For the next 14 days:
 
 - Recently copied games are moved to the end of the list on refresh/restart
 - Deal headers show an amber `Posted` label when that game appears again
+
+**Updating the manual poster (phone, Termux, or desktop):** keep that one file. Replace `manual_poster.py` (and `steam_deals.py` if you use it), but do not delete `.manual_poster_posted.json` in the same folder. If you move the project to a new directory, copy the JSON into the new folder beside the script — the poster does not read history from anywhere else.
+
+Quick check after an update:
+
+```bash
+ls -la .manual_poster_posted.json
+python manual_poster.py
+```
+
+If **Posted** tags are missing, the JSON is probably in a different folder than the new script, the folder was wiped and only `.py` files were copied back, or the entries are older than 14 days. Back up `.manual_poster_posted.json` before major updates if you want a safety copy.
 
 ### Keyword deal search
 
@@ -287,21 +365,33 @@ The search uses Steam's specials endpoint with the keyword and only returns disc
 
 The manual poster includes a separate Nintendo menu so Nintendo deals are not mixed into the main Steam feed.
 
+**Requirement:** install `nintendeals` (`pip install nintendeals` or `pip install -r requirements.txt`). Without it, option **6. Nintendo US deals** will show no results.
+
+When `nintendeals` is installed, the manual poster **uses it directly** and skips Nintendo’s often-dead official sales API (faster loads). Each load fetches **15** discounted games by default (`NINTENDO_DEAL_COUNT` in `steam_deals.py`).
+
+Open from the main menu:
+
 ```text
-7. Nintendo US deals
+6. Nintendo US deals
 ```
 
-You can browse Nintendo deals one-by-one with a dedicated submenu:
+**Nintendo submenu** (same search/refresh numbers as Steam):
 
-- Copy current Nintendo tweet
-- Show next Nintendo deal
-- Search Nintendo keyword
-- Refresh Nintendo deals
-- Back to Steam menu
+```text
+1. Copy tweet
+2. Show next
+3. Search by keyword
+4. Refresh
+5. Back to Steam
+```
 
-Nintendo keyword search uses the same pick syntax as Steam search for copying: single (`3`), list (`3,7`), or range (`3-5`).
+You can browse Nintendo deals one-by-one, or use **3. Search by keyword** for a temporary pick list. Copy syntax matches Steam: single (`3`), list (`3,7`), or range (`3-5`). After search copy, the browse menu returns to the default all-deals feed. **4. Refresh** loads a new shuffled batch of on-sale games.
 
-If Nintendo's legacy US sales endpoint is unavailable, the bot falls back to the free `nintendeals` provider for US deal lookup.
+**Install check:**
+
+```bash
+python -c "import nintendeals; print('nintendeals OK')"
+```
 
 ## Customization
 
@@ -311,12 +401,38 @@ To customize the bot for your needs:
 2. **Change max tweet length**: Set `TWEET_MAX_LENGTH` in `steam_deals.py` (default `280`)
 3. **Change number of genre hashtags**: Set `RELEVANT_HASHTAG_COUNT` (default `2`); skip noisy tags via `GENERIC_TAGS`
 4. **Tune deal variety**: Adjust `POPULAR_SEARCH_PAGES`, `DISCOVERY_SEARCH_SORTS`, `DISCOVERY_OFFSET_LIMIT`, or `sample_size` in `steam_deals.py`
-5. **Tune sale detection**: Edit `SEASONAL_SALE_PATTERN` / `DEFAULT_SOURCE_LABEL`
-6. **Limit description fetches**: Set `DESCRIPTION_ENRICH_LIMIT` (more = richer but slower refresh)
-7. **Adjust the schedule**: Edit the cron expression in `.github/workflows/bot.yml`
-8. **Modify deal selection**: Change the sorting logic in `get_best_deal_tweet()`
-9. **Customize manual poster**: Edit `BANNER`, prompts, bulk copy count, or tweet idea templates in `manual_poster.py`
-10. **Modify web interface**: Update the HTML template in `web_interface.py`
+5. **Tune Nintendo batch size**: Set `NINTENDO_DEAL_COUNT` in `steam_deals.py` (default `15`)
+6. **Tune sale detection**: Edit `SEASONAL_SALE_PATTERN` / `DEFAULT_SOURCE_LABEL`
+7. **Limit description fetches**: Set `DESCRIPTION_ENRICH_LIMIT` (more = richer but slower refresh)
+8. **Adjust the schedule**: Edit the cron expression in `.github/workflows/bot.yml`
+9. **Modify deal selection**: Change the sorting logic in `get_best_deal_tweet()`
+10. **Customize manual poster colors**: Edit `ANSI_COLORS`, `THEME`, and `MENU_STYLES` at the top of `manual_poster.py` (preview with `python manual_poster.py --preview-colors`)
+11. **Customize manual poster content**: Edit `BANNER`, prompts, `BULK_COPY_COUNT`, or tweet idea templates in `manual_poster.py` (`TWEET_IDEA_THEME_EXTRAS` — refresh a few lines each release and bump `TWEET_IDEA_LAST_ROLLED_VERSION` + the version on `ROADMAP.md`)
+12. **Modify web interface**: Update the HTML template in `web_interface.py`
+
+### Manual poster terminal colors
+
+All menu colors flow through three blocks near the top of `manual_poster.py`:
+
+| Block | What it controls |
+|-------|------------------|
+| `ANSI_COLORS` | Named palette (`bright_cyan`, `gray`, `bright_yellow`, etc.) |
+| `THEME` | UI roles (`title`, `value`, `warning`, `tweet`, …) mapped to palette names |
+| `MENU_STYLES` | Menu layout: headers, prompts, option defaults, and per-menu highlights (`steam` / `nintendo`) |
+
+Examples:
+
+- Change **Collections & ideas** color → `MENU_STYLES["highlights"]["steam"][5]`
+- Change **Back to Steam** color → `MENU_STYLES["highlights"]["nintendo"][5]`
+- Change the actual shade → pick a different key in `ANSI_COLORS`, then point a `THEME` role at it
+
+Preview after each save:
+
+```bash
+python manual_poster.py --preview-colors
+```
+
+Disable all colors: set environment variable `STEAMDEALBOT_NO_COLOR=1`.
 
 ## Troubleshooting
 
@@ -357,6 +473,16 @@ To customize the bot for your needs:
 8. **© symbol shows as a box in the manual poster banner**
    - Use Windows Terminal or run `chcp 65001` before `python manual_poster.py` for UTF-8 output
 
+9. **"Nintendo US deals endpoint unavailable" / no Nintendo deals found**
+   - If `nintendeals` is installed, the manual poster uses it directly and should not wait on the dead official API
+   - Without `nintendeals`, install it: `pip install nintendeals`
+   - Verify with: `python -c "import nintendeals; print('nintendeals OK')"`
+   - If it still fails, reinstall from `requirements.txt` and try **4. Refresh** in the Nintendo menu again
+
+10. **Tweaking manual poster colors**
+   - Edit `ANSI_COLORS`, `THEME`, and `MENU_STYLES` in `manual_poster.py`, save, then run `python manual_poster.py --preview-colors`
+   - Restart `python manual_poster.py` to see colors in the full app (colors do not hot-reload mid-session)
+
 ## Current Status
 
 ### Working features
@@ -364,10 +490,12 @@ To customize the bot for your needs:
 - **Dynamic Source Label**: Seasonal sale name when active, else "Steam Specials"
 - **Genre Hashtags**: Up to 2 relevant game tags per tweet for reach
 - **Tweet Formatting**: 280-character cap, strikethrough original prices, clean Steam app URLs, and smart truncation
-- **Manual Posting**: ASCII banner CLI (v2.1.4), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
+- **Manual Posting**: ASCII banner CLI (v2.1.5), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
 - **Tweet Ideas**: 5 themed non-AI ideas using templates plus current deal data for Steam/general gaming
 - **Collections**: Deal modes and category browsing for thread-style posting
 - **Keyword Search**: Search discounted Steam games by keyword and copy one or more matching tweets
+- **Nintendo US Deals**: Manual poster eShop US menu via `nintendeals` (15 deals per load, install required)
+- **Terminal Color Preview**: `python manual_poster.py --preview-colors` for palette and menu samples
 - **Desktop Shortcut**: Easy one-click access on Windows
 - **Web Interface**: Web UI for deal browsing
 - **GitHub Actions**: Runs automatically every 6 hours
