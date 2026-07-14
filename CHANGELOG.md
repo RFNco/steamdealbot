@@ -8,6 +8,24 @@ All notable changes to SteamDealBot will be documented in this file.
 
 ---
 
+## [v2.1.6] - 14-07-2026
+
+### Added
+
+- Added `0 = Search again` for Steam and Nintendo keyword search after zero results or while viewing a result list, so another search does not require returning to the home menu first.
+- Added optional Buffer queue integration for the manual poster (`BUFFER_API_KEY` in `.env`, `buffer_client.py`): **Add to Buffer queue** as menu option **2** on Steam/Nintendo (same color as Copy), plus an optional prompt after copying a tweet (deals, bulk copy, collections, and themed tweet ideas).
+- Nintendo themed tweet ideas now use live Nintendo eShop US deals (with real storefront links), not template-only placeholders.
+- Prefixed the main menu Copy action with `📋 Copy tweet` for clearer scanning.
+- Rolled a few new reusable lines into `TWEET_IDEA_THEME_EXTRAS` for Steam, Nintendo, and Gaming.
+
+### Changed
+
+- Collection deal modes and categories now use the usual tweet source label (active Steam sale name, or `Steam Specials`) instead of collection-specific names like `Steam Big Names` or `Steam Hidden Gems`.
+- Nintendo tweet links now use short `ec.nintendo.com/.../titles/<nsuid>` URLs for base games (`700100…`), and fall back to storefront product pages for DLC/bundles (`700700…`) that hit eShop error **9001-1630** on the short title path.
+- Nintendo discount percentages are computed from regular vs sale price instead of trusting `nintendeals`' often-wrong `sale_discount` field.
+
+---
+
 ## [v2.1.5] - 10-07-2026
 
 ### Added

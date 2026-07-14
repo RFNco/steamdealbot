@@ -1,8 +1,8 @@
 # SteamDealBot Roadmap
 
-**Latest tagged release:** v2.1.4 · **Next release (this commit):** v2.1.5 — update this line when you tag.
+**Latest tagged release:** v2.1.6
 
-Future ideas and improvements to consider after v2.1.5.
+Future ideas and improvements to consider after v2.1.6.
 
 ## Content Quality
 
@@ -16,7 +16,8 @@ Future ideas and improvements to consider after v2.1.5.
 
 - [ ] Add selectable tweet styles: short hype, informative, question/poll, indie spotlight, big discount alert.
 - [ ] Add optional engagement lines like "Would you grab this?" or "Backlog problem or instant buy?"
-- [x] Add more reusable templates for Steam, Nintendo, and general gaming posts (`TWEET_IDEA_THEMES` / `TWEET_IDEA_THEME_EXTRAS` in `manual_poster.py`). **Tweet ideas last rolled: v2.1.5**
+- [x] Add more reusable templates for Steam, Nintendo, and general gaming posts (`TWEET_IDEA_THEMES` / `TWEET_IDEA_THEME_EXTRAS` in `manual_poster.py`). **Tweet ideas last rolled: v2.1.6**
+- [x] Nintendo themed tweet ideas use live eShop US deals (prices, discounts, storefront links), not template-only placeholders.
 - [ ] Add optional AI rewrite mode for fresh wording while keeping the app usable without AI.
 
 **Per-release habit:** before tagging a new version, add, update, or swap a few tweet idea lines in `TWEET_IDEA_THEME_EXTRAS`, then bump **Tweet ideas last rolled** above (and `TWEET_IDEA_LAST_ROLLED_VERSION` in `manual_poster.py`) to match the version you are tagging.
@@ -26,8 +27,10 @@ Future ideas and improvements to consider after v2.1.5.
 - [x] Add "mark as posted" after copying a tweet.
 - [x] Save copied/posted tweets with date, game name, price, and URL.
 - [x] Centralize manual poster terminal/menu colors (`ANSI_COLORS`, `THEME`, `MENU_STYLES`) and add `--preview-colors`.
+- [x] Keyword search "search again" (`0`) after zero results or while viewing results (Steam + Nintendo), without returning to home first.
 - [ ] Add a daily posting mix suggestion, for example 2 popular games, 2 indie games, and 1 engagement tweet.
 - [ ] Add a queue view for prepared tweets.
+- [x] Optional Buffer API queue from the manual poster (`BUFFER_API_KEY`, add-to-queue as option **2**, optional prompt after copy).
 - [ ] Add export to a text file for scheduled posting.
 
 ## Images And Media
@@ -41,7 +44,8 @@ Future ideas and improvements to consider after v2.1.5.
 ## New Sources
 
 - [x] Add Nintendo/eShop deal support when a reliable API or source is chosen.
-- [x] Use short Nintendo eShop links in tweets (`ec.nintendo.com/.../titles/<nsuid>`).
+- [x] Use short Nintendo eShop links in tweets (`ec.nintendo.com/.../titles/<nsuid>` for base games; storefront product URLs for DLC/bundles that fail with **9001-1630**).
+- [x] Fix Nintendo discount % using regular vs sale price (do not trust `nintendeals` `sale_discount` alone).
 - [ ] Explore Epic Games Store, GOG, and Humble Bundle deal sources.
 - [ ] Add source-specific tweet templates.
 
@@ -54,6 +58,7 @@ Future ideas and improvements to consider after v2.1.5.
 - [ ] Add non-AI headline-to-tweet templates with engagement variants (question, recap, hype).
 - [ ] Add source filters (official-only, platform-specific, all sources).
 - [ ] Add recency filters (last 6h, 24h, 3d) for timely posts.
+- [ ] Buffer for news: queue hot headlines to X (`addToQueue` / optional `customScheduled`), and save uncertain items as Buffer Ideas so they don’t burn limited queue slots.
 
 ## Reliability
 

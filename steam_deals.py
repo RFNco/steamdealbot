@@ -56,59 +56,49 @@ DEAL_MODE_CONFIGS = {
     "big_names": {
         "label": "Big names on sale",
         "blurb": "Top-reviewed blockbuster discounts",
-        "source_label": "Steam Big Names",
     },
     "popular_indies": {
         "label": "Popular indies",
         "blurb": "Well-reviewed indie discounts",
-        "source_label": "Steam Popular Indies",
     },
     "hidden_gems": {
         "label": "Hidden gems",
         "blurb": "Lesser-known discounted games",
-        "source_label": "Steam Hidden Gems",
     },
     "deep_discounts": {
         "label": "Deep discounts",
         "blurb": "Highest discount percentages",
-        "source_label": "Steam Deep Discounts",
     },
 }
 DEAL_CATEGORY_CONFIGS = {
     "rpg": {
         "label": "RPG",
         "blurb": "Role-playing games on sale",
-        "source_label": "Steam RPG Deals",
         "tags": "122",
     },
     "horror": {
         "label": "Horror",
         "blurb": "Horror games on sale",
-        "source_label": "Steam Horror Deals",
         "tags": "1667",
     },
     "coop": {
         "label": "Co-op",
         "blurb": "Co-op games on sale",
-        "source_label": "Steam Co-op Deals",
         "tags": "1685",
     },
     "cozy": {
         "label": "Cozy",
         "blurb": "Cozy games on sale",
-        "source_label": "Steam Cozy Deals",
         "tags": "1716",
     },
     "strategy": {
         "label": "Strategy",
         "blurb": "Strategy games on sale",
-        "source_label": "Steam Strategy Deals",
         "tags": "9",
     },
     "under_5": {
         "label": "Under $5",
         "blurb": "Discounted games priced at $5 or less",
-        "source_label": "Steam Under $5",
         "max_price_usd": 5.0,
     },
 }
@@ -761,7 +751,19 @@ class SteamDealDetector:
         if sale_value is None:
             return None
 
-        discount_pct = int(getattr(price, "sale_discount", 0) or 0)
+        # Prefer price math over nintendeals' sale_discount — that field is often wrong
+        # (e.g. DISTRAINT Deluxe: library says 33%, storefront is ~66% from $5.99 → $1.99).
+        discount_pct = 0
+        try:
+            if regular_value and float(regular_value) > float(sale_value) > 0:
+                discount_pct = int(
+                    ((float(regular_value) - float(sale_value)) / float(regular_value)) * 100
+                )
+        except (TypeError, ValueError, ZeroDivisionError):
+            discount_pct = 0
+        if discount_pct <= 0:
+            discount_pct = int(getattr(price, "sale_discount", 0) or 0)
+
         slug = getattr(game, "slug", "") or ""
         nsuid = str(getattr(game, "nsuid", "") or "").strip()
         url = f"https://www.nintendo.com/us/store/products/{slug}/" if slug else ""
@@ -1000,14 +1002,17 @@ class SteamDealDetector:
             seen_names.add(key)
         return unique_deals
 
-    def _finalize_collection_deals(self, deals, source_label, count=COLLECTION_DEAL_COUNT):
+    def _finalize_collection_deals(self, deals, collection_label, count=COLLECTION_DEAL_COUNT):
         deals = self._dedupe_deals_by_name(deals)
         random.shuffle(deals)
         deals = deals[:count]
+        # Keep tweet source on the usual sale label (active sale / Steam Specials),
+        # not collection names like "Big Names" or "Hidden Gems".
+        usual_source = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
         for deal in deals:
-            deal['source'] = source_label
+            deal['source'] = usual_source
         self._enrich_descriptions(deals)
-        print_progress(f"Found {len(deals)} deals for {source_label}")
+        print_progress(f"Found {len(deals)} deals for {collection_label}")
         return deals
 
     def _filter_deals_by_max_price(self, deals, max_price_usd):
@@ -1103,7 +1108,7 @@ class SteamDealDetector:
             ]
             deals.sort(key=self._discount_percent_from_deal, reverse=True)
 
-        return self._finalize_collection_deals(deals, config['source_label'], count=count)
+        return self._finalize_collection_deals(deals, config['label'], count=count)
 
     def get_category_deals(self, category_key, count=COLLECTION_DEAL_COUNT):
         config = DEAL_CATEGORY_CONFIGS.get(category_key)
@@ -1128,10 +1133,11 @@ class SteamDealDetector:
             deals = self._sample_deals_across_price_buckets(deals, max_price, count=count)
             if not deals:
                 return []
+            usual_source = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
             for deal in deals:
-                deal['source'] = config['source_label']
+                deal['source'] = usual_source
             self._enrich_descriptions(deals)
-            print_progress(f"Found {len(deals)} deals for {config['source_label']}")
+            print_progress(f"Found {len(deals)} deals for {config['label']}")
             return deals
         else:
             data = self._fetch_search_results_json(
@@ -1144,7 +1150,7 @@ class SteamDealDetector:
                 source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
                 deals = self._parse_search_results_html(data['results_html'], source_label)
 
-        return self._finalize_collection_deals(deals, config['source_label'], count=count)
+        return self._finalize_collection_deals(deals, config['label'], count=count)
 
     def get_random_specials(self, count=STEAM_DEAL_COUNT):
         """Get a balanced set of specials favoring reviewed/popular games.
@@ -1349,16 +1355,26 @@ class SteamDealDetector:
 
     @staticmethod
     def _trim_nintendo_url(url: str, nsuid=None) -> str:
+        """Build a Nintendo storefront URL for tweets.
+
+        Base-game NSUIDs (700100...) resolve cleanly via short eShop title links.
+        DLC / bundle / AOC IDs (commonly 700700...) often fail on that path with
+        error 9001-1630, so keep the storefront product URL for those instead.
+        """
         nsuid_text = str(nsuid or "").strip()
         if not nsuid_text:
             match = re.search(r"ec\.nintendo\.com/[^/]+/[^/]+/titles/(\d+)", url or "")
             if match:
                 nsuid_text = match.group(1)
+
+        storefront_url = (url or "").split("?")[0]
+        if nsuid_text.isdigit() and nsuid_text.startswith("700100"):
+            return f"https://ec.nintendo.com/US/en/titles/{nsuid_text}"
+        if storefront_url:
+            return storefront_url
         if nsuid_text.isdigit():
             return f"https://ec.nintendo.com/US/en/titles/{nsuid_text}"
-        if url:
-            return url.split("?")[0]
-        return url
+        return storefront_url
 
     @staticmethod
     def _steam_app_id_from_url(url: str):

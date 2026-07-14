@@ -20,6 +20,7 @@ from steam_deals import (
     DEAL_MODE_CONFIGS,
     DEAL_CATEGORY_CONFIGS,
 )
+from buffer_client import BufferClient
 import json
 import re
 import time
@@ -30,6 +31,10 @@ import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Try to import pyperclip optionally; we provide fallbacks below
 try:
     import pyperclip  # type: ignore
@@ -38,7 +43,11 @@ except Exception:
     pyperclip = None  # type: ignore
     _HAS_PYPERCLIP = False
 
-VERSION = "v2.1.5"
+VERSION = "v2.1.6"
+
+# Lazily created when BUFFER_API_KEY is set in .env
+_BUFFER_CLIENT: Optional[BufferClient] = None
+_BUFFER_CHECKED = False
 
 POSTED_HISTORY_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -119,17 +128,27 @@ MENU_STYLES = {
     "highlights": {
         "steam": {
             1: "warning",    # Copy tweet
-          # 2: "warning",   # Show next
             3: "title",      # Search by keyword
             4: "success",    # Refresh
-            
+        },
+        "steam_buffer": {
+            1: "warning",    # Copy tweet
+            2: "warning",    # Add to Buffer queue
+            4: "title",      # Search by keyword
+            5: "success",    # Refresh
         },
         "nintendo": {
             1: "warning",    # Copy tweet
-          #  2: "warning",   # Show next
             3: "title",      # Search by keyword
             4: "success",    # Refresh
             5: "muted",      # Back to Steam
+        },
+        "nintendo_buffer": {
+            1: "warning",    # Copy tweet
+            2: "warning",    # Add to Buffer queue
+            4: "title",      # Search by keyword
+            5: "success",    # Refresh
+            6: "muted",      # Back to Steam
         },
     },
 }
@@ -137,7 +156,7 @@ MENU_STYLES = {
 # Reusable themed tweet ideas (Collections & ideas). Before each version tag, add or
 # swap a few lines in TWEET_IDEA_THEME_EXTRAS, then bump TWEET_IDEA_LAST_ROLLED_VERSION
 # (and the matching version on ROADMAP.md) to match the release you are tagging.
-TWEET_IDEA_LAST_ROLLED_VERSION = "v2.1.5"
+TWEET_IDEA_LAST_ROLLED_VERSION = "v2.1.6"
 TWEET_IDEA_THEMES = {
     "1": (
         "Steam",
@@ -200,6 +219,8 @@ TWEET_IDEA_THEME_EXTRAS = {
         "New week, new Steam deals: are you hunting discounts or finally clearing the backlog? #Steam #PCGaming",
         "That moment when a wishlisted game finally hits the price you wanted. What are you waiting on? #SteamDeals",
         "Steam players: buy the comfort replay or gamble on something totally new? #Steam #Gaming",
+        "Buffer-ready Steam question: which deal on your wishlist actually deserves a queue slot today? #SteamDeals",
+        "Steam check: is the best find the big-name discount or the under-$10 surprise? #Steam #PCGaming",
     ],
     "2": [
         "Nintendo-style fun is all about games you can pick up anytime and still smile. What has that energy for you? #Nintendo",
@@ -223,6 +244,8 @@ TWEET_IDEA_THEME_EXTRAS = {
         "Rainy day, cozy game, no plans to leave the couch. What is your perfect Switch combo? #Nintendo #Gaming",
         "Some Switch games are worth keeping installed forever. What never gets deleted from yours? #NintendoSwitch",
         "Nintendo fans: quick arcade session or settle in for a long RPG night? #Nintendo #Gaming",
+        "eShop temptation check: grab the discount now or wait for an even deeper cut? #NintendoDeals #NintendoSwitch",
+        "Switch deal night: one sale game, one comfort install, and no promises about sleep. #Nintendo #Gaming",
     ],
     "3": [
         "Gaming backlog status: organized library or beautiful chaos? #Gaming #GameDeals",
@@ -246,6 +269,8 @@ TWEET_IDEA_THEME_EXTRAS = {
         "Weekend gaming plan: one new pickup, one old favorite, and zero guilt about the backlog. #Gaming",
         "What discount percentage makes you stop thinking and start buying? #GameDeals #GamingCommunity",
         "Gaming check-in: what are you playing tonight and why did you pick it? #Gaming",
+        "Queue vs backlog: schedule one post-worthy deal or keep hunting for a better find? #GameDeals #Gaming",
+        "Honest gaming mood: hype post, chill rec, or 'would you buy this?' poll energy tonight? #GamingCommunity",
     ],
 }
 for theme_key, extra_templates in TWEET_IDEA_THEME_EXTRAS.items():
@@ -351,7 +376,72 @@ def print_banner() -> None:
     print()
     print_separator(len(SEPARATOR))
     themed_print(f"Manual Poster - {VERSION}", "title")
+    if get_buffer_client():
+        themed_print("Buffer queue: ready (API key loaded)", "muted")
     print_separator(len(SEPARATOR))
+
+
+def get_buffer_client() -> Optional[BufferClient]:
+    """Return a shared Buffer client when BUFFER_API_KEY is configured."""
+    global _BUFFER_CLIENT, _BUFFER_CHECKED
+    if _BUFFER_CHECKED:
+        return _BUFFER_CLIENT
+    _BUFFER_CHECKED = True
+    _BUFFER_CLIENT = BufferClient.from_env()
+    return _BUFFER_CLIENT
+
+
+def send_tweet_to_buffer(text: str) -> bool:
+    """Queue one tweet in Buffer. Returns True on success."""
+    client = get_buffer_client()
+    if client is None:
+        themed_print(
+            "Buffer is not configured. Add BUFFER_API_KEY to your .env file.",
+            "warning",
+        )
+        return False
+
+    themed_print("Sending to Buffer queue...", "muted")
+    result = client.add_text_to_queue(text)
+    if result.ok:
+        themed_print(result.message, "success")
+        return True
+    themed_print(f"Buffer queue failed: {result.message}", "error")
+    if "queue" in result.message.lower() and "full" in result.message.lower():
+        themed_print(
+            "Your Buffer queue may be full (free plans are often capped at 10).",
+            "warning",
+        )
+    return False
+
+
+def prompt_buffer_after_copy(texts: List[str]) -> None:
+    """Optional follow-up: send copied tweet(s) to Buffer after clipboard copy."""
+    if not get_buffer_client() or not texts:
+        return
+    if len(texts) == 1:
+        prompt = "\nAdd this tweet to Buffer queue too? (y/Enter=skip): "
+    else:
+        prompt = (
+            f"\nAdd these {len(texts)} tweets to Buffer queue too? "
+            f"(y/Enter=skip, uses {len(texts)} queue slots): "
+        )
+    choice = themed_input(prompt, "muted").strip().lower()
+    if choice not in ("y", "yes"):
+        return
+    ok_count = 0
+    for index, text in enumerate(texts, 1):
+        if len(texts) > 1:
+            themed_print(f"Buffering tweet {index}/{len(texts)}...", "muted")
+        if send_tweet_to_buffer(text):
+            ok_count += 1
+        else:
+            break
+    if len(texts) > 1 and ok_count:
+        themed_print(
+            f"Queued {ok_count}/{len(texts)} tweet(s) in Buffer.",
+            "success" if ok_count == len(texts) else "warning",
+        )
 
 
 def print_tweet_preview(tweet: str) -> None:
@@ -582,6 +672,8 @@ def copy_collection_results(
         themed_print(success_message, "success")
         if track_posted:
             themed_print("Marked as posted for more variety on future refreshes.", "muted")
+        tweets = [tweet_formatter(deal) for deal in selected_deals]
+        prompt_buffer_after_copy(tweets)
     else:
         themed_print("Could not copy the selected pick(s) automatically.", "error")
         themed_print("Please manually copy the selected tweet(s) above if needed.", "warning")
@@ -593,13 +685,28 @@ def copy_collection_results(
     return copied
 
 
+def prompt_search_again() -> bool:
+    """Ask whether to run another keyword search (0) or leave (Enter)."""
+    choice = themed_input(
+        "\n0 = Search again, Enter = back: ",
+        MENU_STYLES["prompt"],
+    ).strip()
+    return choice == "0"
+
+
 def show_collection_copy_loop(
     detector: SteamDealDetector,
     title: str,
     results: List[Dict],
     tweet_formatter=None,
     track_posted: bool = True,
-) -> None:
+    allow_search_again: bool = False,
+) -> str:
+    """Show ranked results and copy tweets.
+
+    Returns "search_again" when the user chooses 0 (only if allow_search_again),
+    otherwise "back".
+    """
     if tweet_formatter is None:
         tweet_formatter = detector.format_deal_tweet
 
@@ -608,7 +715,7 @@ def show_collection_copy_loop(
         results, posted_count = deprioritize_posted_deals(results)
     if not results:
         themed_print(f"No deals found for {title}.", "warning")
-        return
+        return "back"
 
     if posted_count:
         themed_print(
@@ -620,11 +727,17 @@ def show_collection_copy_loop(
     print_collection_results(title, results)
 
     while True:
-        copy_choice = themed_input(
-            f"\nCopy which pick(s)? (1-{len(results)}, e.g. 3 or 3,7 or 3-5, Enter=back): "
-        ).strip()
+        prompt = (
+            f"\nCopy which pick(s)? (1-{len(results)}, e.g. 3,7 / 3-5"
+        )
+        if allow_search_again:
+            prompt += ", 0=new search"
+        prompt += ", Enter=back): "
+        copy_choice = themed_input(prompt).strip()
         if not copy_choice:
-            return
+            return "back"
+        if allow_search_again and copy_choice == "0":
+            return "search_again"
 
         indices = parse_result_selection(copy_choice, len(results))
         if not indices:
@@ -638,7 +751,13 @@ def show_collection_copy_loop(
             tweet_formatter=tweet_formatter,
             track_posted=track_posted,
         )
-        themed_print("Copy more from this collection, or press Enter to go back.", "muted")
+        if allow_search_again:
+            themed_print(
+                "Copy more from this list, 0 = search again, or press Enter to go back.",
+                "muted",
+            )
+        else:
+            themed_print("Copy more from this collection, or press Enter to go back.", "muted")
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -729,10 +848,17 @@ def get_deal_value(deal: Dict, key: str, fallback: str = "") -> str:
     return str(value)
 
 
-def generate_deal_based_ideas(theme_choice: str, deals: List[Dict]) -> List[str]:
-    if theme_choice == "2":
-        return []
+def deal_share_url(deal: Dict) -> str:
+    """Prefer a trimmed Nintendo storefront URL when the deal is from eShop."""
+    url = get_deal_value(deal, "steam_url")
+    nsuid = deal.get("nsuid")
+    source = get_deal_value(deal, "source").lower()
+    if nsuid or "nintendo" in source or "nintendo.com" in url or "ec.nintendo.com" in url:
+        return SteamDealDetector._trim_nintendo_url(url, nsuid)
+    return SteamDealDetector._trim_steam_url(url)
 
+
+def generate_deal_based_ideas(theme_choice: str, deals: List[Dict]) -> List[str]:
     if not deals:
         return []
 
@@ -744,40 +870,40 @@ def generate_deal_based_ideas(theme_choice: str, deals: List[Dict]) -> List[str]
         price = get_deal_value(deal, "price", "a new low price")
         discount = get_deal_value(deal, "discount", "on sale")
         source = get_deal_value(deal, "source", "Steam")
-        steam_url = SteamDealDetector._trim_steam_url(get_deal_value(deal, "steam_url"))
+        share_url = deal_share_url(deal)
 
         if theme_choice == "1":
             templates = [
-                f"{name} is sitting at {price} with {discount} off on Steam. Backlog risk: very high.\n{steam_url}\n#SteamDeals #Gaming",
-                f"Steam deal watch: {name} is {discount} off right now. Grab now or wishlist later?\n{steam_url}\n#Steam #PCGaming",
-                f"{source} has {name} at {price}. Anyone played this one yet?\n{steam_url}\n#SteamDeals #Gaming",
-                f"Wishlist alert: {name} dropped to {price}. This might be the sign.\n{steam_url}\n#SteamDeals #PCGaming",
-                f"If you were waiting for a discount on {name}, it is now {discount} off.\n{steam_url}\n#Steam #GameDeals",
-                f"Steam find of the moment: {name} at {price}. Worth adding to the weekend plan?\n{steam_url}\n#SteamDeals",
-                f"{name} is on sale through {source}. Who has this one in their library already?\n{steam_url}\n#Steam #Gaming",
-                f"Deal hunters, {name} is now {discount} off. Is it backlog fuel or a must-play?\n{steam_url}\n#SteamDeals #Gaming",
+                f"{name} is sitting at {price} with {discount} off on Steam. Backlog risk: very high.\n{share_url}\n#SteamDeals #Gaming",
+                f"Steam deal watch: {name} is {discount} off right now. Grab now or wishlist later?\n{share_url}\n#Steam #PCGaming",
+                f"{source} has {name} at {price}. Anyone played this one yet?\n{share_url}\n#SteamDeals #Gaming",
+                f"Wishlist alert: {name} dropped to {price}. This might be the sign.\n{share_url}\n#SteamDeals #PCGaming",
+                f"If you were waiting for a discount on {name}, it is now {discount} off.\n{share_url}\n#Steam #GameDeals",
+                f"Steam find of the moment: {name} at {price}. Worth adding to the weekend plan?\n{share_url}\n#SteamDeals",
+                f"{name} is on sale through {source}. Who has this one in their library already?\n{share_url}\n#Steam #Gaming",
+                f"Deal hunters, {name} is now {discount} off. Is it backlog fuel or a must-play?\n{share_url}\n#SteamDeals #Gaming",
             ]
         elif theme_choice == "2":
             templates = [
-                f"Nintendo fans, if {name} had that pick-up-and-play Switch energy, would it be on your list?\n{steam_url}\n#NintendoSwitch #Gaming",
-                f"{name} feels like the kind of game that would be perfect for handheld sessions.\n{steam_url}\n#Nintendo #Gaming",
-                f"Switch-style question: quick cozy sessions or long adventure nights like {name} seems built for?\n{steam_url}\n#NintendoSwitch",
-                f"If {name} came to Switch, would you play it handheld or docked first?\n{steam_url}\n#NintendoSwitch #Gaming",
-                f"{name} has that 'one more session' energy. Nintendo fans, would this fit your rotation?\n{steam_url}\n#Nintendo #Gaming",
-                f"Portable gaming thought: {name} at {price} sounds like a solid weekend pickup.\n{steam_url}\n#NintendoSwitch",
-                f"Nintendo-style question: is {name} more couch game, travel game, or late-night game?\n{steam_url}\n#Nintendo #Gaming",
-                f"Imagine {name} in your handheld backlog. Instant play or wait for later?\n{steam_url}\n#NintendoSwitch",
+                f"{name} is {discount} on Nintendo eShop US at {price}. Instant buy or wait for the next sale?\n{share_url}\n#NintendoDeals #NintendoSwitch",
+                f"Switch deal watch: {name} dropped to {price}. Who is grabbing this one?\n{share_url}\n#NintendoSwitch #Gaming",
+                f"{name} is on sale right now ({discount}). Handheld sessions incoming?\n{share_url}\n#NintendoDeals #Nintendo",
+                f"eShop find: {name} for {price}. Quick cozy night or long adventure save?\n{share_url}\n#NintendoSwitch #Gaming",
+                f"If {name} was on your wishlist, {discount} off at {price} is hard to ignore.\n{share_url}\n#NintendoDeals #NintendoSwitch",
+                f"Portable gaming temptation: {name} is {discount} on the eShop. Add it or stay disciplined?\n{share_url}\n#NintendoSwitch",
+                f"{source} has {name} at {price}. Docked first or handheld first?\n{share_url}\n#Nintendo #Gaming",
+                f"Nintendo deal spotlight: {name} is {discount} off. Who should check this one out?\n{share_url}\n#NintendoDeals #Gaming",
             ]
         else:
             templates = [
-                f"{name} is {discount} off at {price}. Good deal, backlog problem, or both?\n{steam_url}\n#Gaming #GameDeals",
-                f"Deal question: would you try {name} because of the discount, reviews, or genre first?\n{steam_url}\n#GamingCommunity",
-                f"Current gaming temptation: {name} for {price}. What game deal got your attention today?\n{steam_url}\n#Gaming #GameDeals",
-                f"{name} is on sale now. Is this the kind of deal you grab fast or research first?\n{steam_url}\n#Gaming #GameDeals",
-                f"Backlog test: {name} at {price}. Are you adding it or staying disciplined?\n{steam_url}\n#GamingCommunity",
-                f"Game deal spotlight: {name} is {discount} off. Who should check this one out?\n{steam_url}\n#GameDeals",
-                f"Would you rather jump into {name} tonight or save it for the weekend?\n{steam_url}\n#Gaming",
-                f"{name} caught my eye at {price}. What sale game is calling your name today?\n{steam_url}\n#Gaming #GameDeals",
+                f"{name} is {discount} off at {price}. Good deal, backlog problem, or both?\n{share_url}\n#Gaming #GameDeals",
+                f"Deal question: would you try {name} because of the discount, reviews, or genre first?\n{share_url}\n#GamingCommunity",
+                f"Current gaming temptation: {name} for {price}. What game deal got your attention today?\n{share_url}\n#Gaming #GameDeals",
+                f"{name} is on sale now. Is this the kind of deal you grab fast or research first?\n{share_url}\n#Gaming #GameDeals",
+                f"Backlog test: {name} at {price}. Are you adding it or staying disciplined?\n{share_url}\n#GamingCommunity",
+                f"Game deal spotlight: {name} is {discount} off. Who should check this one out?\n{share_url}\n#GameDeals",
+                f"Would you rather jump into {name} tonight or save it for the weekend?\n{share_url}\n#Gaming",
+                f"{name} caught my eye at {price}. What sale game is calling your name today?\n{share_url}\n#Gaming #GameDeals",
             ]
 
         ideas.append(random.choice(templates))
@@ -786,11 +912,16 @@ def generate_deal_based_ideas(theme_choice: str, deals: List[Dict]) -> List[str]
         first, second = random.sample(sampled_deals, 2)
         first_name = get_deal_value(first, "name", "Game 1")
         second_name = get_deal_value(second, "name", "Game 2")
-        first_url = SteamDealDetector._trim_steam_url(get_deal_value(first, "steam_url"))
-        second_url = SteamDealDetector._trim_steam_url(get_deal_value(second, "steam_url"))
-        ideas.append(
-            f"Quick pick: would you rather grab {first_name} or {second_name} while both are on sale?\n{first_url}\n{second_url}\n#Gaming #GameDeals"
-        )
+        first_url = deal_share_url(first)
+        second_url = deal_share_url(second)
+        if theme_choice == "2":
+            ideas.append(
+                f"Quick Switch pick: {first_name} or {second_name} while both are on sale?\n{first_url}\n{second_url}\n#NintendoDeals #NintendoSwitch"
+            )
+        else:
+            ideas.append(
+                f"Quick pick: would you rather grab {first_name} or {second_name} while both are on sale?\n{first_url}\n{second_url}\n#Gaming #GameDeals"
+            )
 
     return ideas
 
@@ -807,7 +938,7 @@ def generate_tweet_ideas(theme_choice: str, deals: List[Dict]) -> List[str]:
     ]
 
 
-def show_tweet_ideas_menu(deals: List[Dict]) -> None:
+def show_tweet_ideas_menu(detector: SteamDealDetector, deals: List[Dict]) -> None:
     themed_print("\nChoose a tweet idea theme:", "value")
     for theme_key, (theme_name, _) in TWEET_IDEA_THEMES.items():
         print(color_text(f"{theme_key}. ", "muted") + color_text(theme_name, "value"))
@@ -818,10 +949,25 @@ def show_tweet_ideas_menu(deals: List[Dict]) -> None:
         return
 
     theme_name, _ = TWEET_IDEA_THEMES[theme_choice]
-    ideas = generate_tweet_ideas(theme_choice, deals)
+    idea_deals = deals
+    status_line = "Using current Steam deal data plus reusable templates."
+
+    if theme_choice == "2":
+        themed_print("Fetching Nintendo eShop US deals for tweet ideas...", "muted")
+        idea_deals = detector.get_nintendo_us_deals(count=max(TWEET_IDEA_COUNT * 2, 10))
+        if idea_deals:
+            status_line = "Using current Nintendo eShop deals plus reusable templates."
+        else:
+            themed_print(
+                "No Nintendo deals right now — falling back to reusable templates only.",
+                "warning",
+            )
+            status_line = "Using reusable Nintendo templates only."
+
+    ideas = generate_tweet_ideas(theme_choice, idea_deals)
 
     themed_print(f"\n{theme_name} tweet ideas:", "title")
-    themed_print("Using current Steam deal data plus reusable templates.", "value")
+    themed_print(status_line, "value")
     themed_print("-" * 30, "muted")
     for index, idea in enumerate(ideas, 1):
         print_tweet_idea(index, idea)
@@ -843,6 +989,7 @@ def show_tweet_ideas_menu(deals: List[Dict]) -> None:
     selected_idea = ideas[idea_index - 1]
     if copy_to_clipboard(selected_idea):
         themed_print(f"Idea #{idea_index} copied to clipboard!", "success")
+        prompt_buffer_after_copy([selected_idea])
     else:
         themed_print("Could not copy that tweet idea to clipboard automatically.", "error")
         themed_print("Please manually copy the selected idea above if needed.", "warning")
@@ -929,7 +1076,7 @@ def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> Non
             return
 
         if choice == "1":
-            show_tweet_ideas_menu(deals)
+            show_tweet_ideas_menu(detector, deals)
         elif choice == "2":
             show_deal_modes_menu(detector)
         elif choice == "3":
@@ -939,17 +1086,28 @@ def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> Non
 
 
 def show_keyword_search_menu(detector: SteamDealDetector) -> None:
-    keyword = themed_input("\nSearch discounted Steam games by keyword: ").strip()
-    if not keyword:
-        return
+    while True:
+        keyword = themed_input("\nSearch discounted Steam games by keyword: ").strip()
+        if not keyword:
+            return
 
-    themed_print(f"Searching discounted Steam games for \"{keyword}\"...", "muted")
-    results = detector.search_discounted_games(keyword)
-    if not results:
-        themed_print(f"No discounted games found for \"{keyword}\" right now.", "warning")
-        return
+        themed_print(f"Searching discounted Steam games for \"{keyword}\"...", "muted")
+        results = detector.search_discounted_games(keyword)
+        if not results:
+            themed_print(f"No discounted games found for \"{keyword}\" right now.", "warning")
+            if prompt_search_again():
+                continue
+            return
 
-    show_collection_copy_loop(detector, f'Search results for "{keyword}"', results)
+        action = show_collection_copy_loop(
+            detector,
+            f'Search results for "{keyword}"',
+            results,
+            allow_search_again=True,
+        )
+        if action == "search_again":
+            continue
+        return
 
 
 def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
@@ -974,22 +1132,34 @@ def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
         print_tweet_preview(tweet)
         themed_print("-" * 30, "muted")
 
+        buffer_ready = bool(get_buffer_client())
+        buffer_offset = 1 if buffer_ready else 0
+        nintendo_options = [(1, "📋 Copy tweet")]
+        if buffer_ready:
+            nintendo_options.append((2, "Add to Buffer queue"))
+        nintendo_options.extend(
+            [
+                (2 + buffer_offset, "Show next"),
+                (3 + buffer_offset, "Search by keyword"),
+                (4 + buffer_offset, "Refresh"),
+                (5 + buffer_offset, "Back to Steam"),
+            ]
+        )
+        max_choice = 5 + buffer_offset
+        nintendo_prompt = f"Choice (1-{max_choice}, Enter=next): "
+        nintendo_menu_type = "nintendo_buffer" if buffer_ready else "nintendo"
+
         choice = prompt_menu_choice(
             "Nintendo menu:",
-            [
-                (1, "Copy tweet"),
-                (2, "Show next"),
-                (3, "Search by keyword"),
-                (4, "Refresh"),
-                (5, "Back to Steam"),
-            ],
-            "Choice (1-5, Enter=next): ",
-            menu_type="nintendo",
+            nintendo_options,
+            nintendo_prompt,
+            menu_type=nintendo_menu_type,
         )
 
         if choice == "1":
             if copy_to_clipboard(tweet):
                 themed_print("Nintendo tweet copied to clipboard!", "success")
+                prompt_buffer_after_copy([tweet])
             else:
                 themed_print("Could not copy that Nintendo tweet automatically.", "error")
                 themed_print("Please manually copy the selected tweet above if needed.", "warning")
@@ -998,34 +1168,52 @@ def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
                 deal_index += 1
             continue
 
-        if choice == "" or choice == "2":
+        if buffer_ready and choice == "2":
+            if send_tweet_to_buffer(tweet):
+                if deal_index < len(results) - 1:
+                    deal_index += 1
+            themed_input("\nPress Enter to continue...", "muted")
+            continue
+
+        if choice == "" or choice == str(2 + buffer_offset):
             if deal_index < len(results) - 1:
                 deal_index += 1
             else:
                 themed_print("Reached the last Nintendo deal in this list.", "warning")
             continue
 
-        if choice == "3":
-            new_keyword = themed_input(
-                "\nNintendo keyword (Enter for all deals): "
-            ).strip()
-            new_results = fetch_nintendo_deals(new_keyword)
-            if not new_results:
-                themed_print("No Nintendo discounted games found for that search.", "warning")
-                continue
-            search_title = "Nintendo US discounted deals"
-            if new_keyword:
-                search_title += f' for "{new_keyword}"'
-            show_collection_copy_loop(
-                detector,
-                search_title,
-                new_results,
-                tweet_formatter=detector.format_nintendo_deal_tweet,
-                track_posted=False,
-            )
+        if choice == str(3 + buffer_offset):
+            while True:
+                new_keyword = themed_input(
+                    "\nNintendo keyword (Enter for all deals): "
+                ).strip()
+                new_results = fetch_nintendo_deals(new_keyword)
+                if not new_results:
+                    themed_print(
+                        "No Nintendo discounted games found for that search.",
+                        "warning",
+                    )
+                    if prompt_search_again():
+                        continue
+                    break
+
+                search_title = "Nintendo US discounted deals"
+                if new_keyword:
+                    search_title += f' for "{new_keyword}"'
+                action = show_collection_copy_loop(
+                    detector,
+                    search_title,
+                    new_results,
+                    tweet_formatter=detector.format_nintendo_deal_tweet,
+                    track_posted=False,
+                    allow_search_again=True,
+                )
+                if action == "search_again":
+                    continue
+                break
             continue
 
-        if choice == "4":
+        if choice == str(4 + buffer_offset):
             refreshed_results = fetch_nintendo_deals("")
             if not refreshed_results:
                 themed_print("No Nintendo discounted games found on refresh.", "warning")
@@ -1034,7 +1222,7 @@ def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
             deal_index = 0
             continue
 
-        if choice == "5":
+        if choice == str(5 + buffer_offset):
             return
 
         themed_print("Invalid choice. Please try again.", "error")
@@ -1059,26 +1247,30 @@ def preview_theme_colors() -> None:
     themed_print("-" * 30, "muted")
     print(color_text("What would you like to do?", MENU_STYLES["header"]))
     for number, text in (
-        (1, "Copy tweet"),
-        (2, "Show next"),
-        (3, "Search by keyword"),
-        (4, "Refresh"),
-        (5, "Collections & ideas"),
-        (6, "Nintendo US deals"),
+        (1, "📋 Copy tweet"),
+        (2, "Add to Buffer queue"),
+        (3, "Show next"),
+        (4, "Search by keyword"),
+        (5, "Refresh"),
+        (6, "Collections & ideas"),
+        (7, "Nintendo US deals"),
+        (8, "Copy 5 deals"),
+        (9, "Exit"),
     ):
-        print(format_menu_option(number, text, menu_type="steam"))
+        print(format_menu_option(number, text, menu_type="steam_buffer"))
 
     themed_print("\nSample Nintendo menu", "title")
     themed_print("-" * 30, "muted")
     print(color_text("Nintendo menu:", MENU_STYLES["header"]))
     for number, text in (
-        (1, "Copy tweet"),
-        (2, "Show next"),
-        (3, "Search by keyword"),
-        (4, "Refresh"),
-        (5, "Back to Steam"),
+        (1, "📋 Copy tweet"),
+        (2, "Add to Buffer queue"),
+        (3, "Show next"),
+        (4, "Search by keyword"),
+        (5, "Refresh"),
+        (6, "Back to Steam"),
     ):
-        print(format_menu_option(number, text, menu_type="nintendo"))
+        print(format_menu_option(number, text, menu_type="nintendo_buffer"))
 
     print()
     themed_print(
@@ -1131,20 +1323,31 @@ def main():
             themed_print("-" * 30, "muted")
             
             # Ask user what to do
+            buffer_ready = bool(get_buffer_client())
+            buffer_offset = 1 if buffer_ready else 0
+            steam_options = [(1, "📋 Copy tweet")]
+            if buffer_ready:
+                steam_options.append((2, "Add to Buffer queue"))
+            steam_options.extend(
+                [
+                    (2 + buffer_offset, "Show next"),
+                    (3 + buffer_offset, "Search by keyword"),
+                    (4 + buffer_offset, "Refresh"),
+                    (5 + buffer_offset, "Collections & ideas"),
+                    (6 + buffer_offset, "Nintendo US deals"),
+                    (7 + buffer_offset, f"Copy {BULK_COPY_COUNT} deals"),
+                    (8 + buffer_offset, "Exit"),
+                ]
+            )
+            max_choice = 8 + buffer_offset
+            steam_prompt = f"Choice (1-{max_choice}, Enter=next): "
+            steam_menu_type = "steam_buffer" if buffer_ready else "steam"
+
             choice = prompt_menu_choice(
                 "What would you like to do?",
-                [
-                    (1, "Copy tweet"),
-                    (2, "Show next"),
-                    (3, "Search by keyword"),
-                    (4, "Refresh"),
-                    (5, "Collections & ideas"),
-                    (6, "Nintendo US deals"),
-                    (7, f"Copy {BULK_COPY_COUNT} deals"),
-                    (8, "Exit"),
-                ],
-                "Choice (1-8, Enter=next): ",
-                menu_type="steam",
+                steam_options,
+                steam_prompt,
+                menu_type=steam_menu_type,
             )
             
             if choice == '1':
@@ -1152,6 +1355,7 @@ def main():
                     mark_deal_posted(deal)
                     themed_print("Tweet copied to clipboard! You can now paste it on 𝕏.", "success")
                     themed_print("Marked as posted for more variety on future refreshes.", "muted")
+                    prompt_buffer_after_copy([tweet])
                 else:
                     themed_print("Could not copy to clipboard automatically.", "error")
                     if not _HAS_PYPERCLIP:
@@ -1163,37 +1367,48 @@ def main():
                 themed_input("\nPress Enter to continue...", "muted")
                 deal_index += 1
                 
-            elif choice == '' or choice == '2':
+            elif buffer_ready and choice == '2':
+                if send_tweet_to_buffer(tweet):
+                    mark_deal_posted(deal)
+                    themed_print("Marked as posted for more variety on future refreshes.", "muted")
+                    deal_index += 1
+                themed_input("\nPress Enter to continue...", "muted")
+
+            elif choice == '' or choice == str(2 + buffer_offset):
                 deal_index += 1
                 continue
                 
-            elif choice == '3':
+            elif choice == str(3 + buffer_offset):
                 show_keyword_search_menu(detector)
                 themed_input("\nPress Enter to continue...", "muted")
                 continue
 
-            elif choice == '4':
+            elif choice == str(4 + buffer_offset):
                 refresh_requested = True
                 break
                 
-            elif choice == '5':
+            elif choice == str(5 + buffer_offset):
                 show_collections_menu(detector, deals)
                 themed_input("\nPress Enter to continue...", "muted")
                 continue
 
-            elif choice == '6':
+            elif choice == str(6 + buffer_offset):
                 show_nintendo_deals_menu(detector)
                 themed_input("\nPress Enter to continue...", "muted")
                 continue
 
-            elif choice == '7':
+            elif choice == str(7 + buffer_offset):
                 bulk_deals = deals[deal_index:deal_index + BULK_COPY_COUNT]
+                bulk_tweet_list = [
+                    detector.format_deal_tweet(bulk_deal) for bulk_deal in bulk_deals
+                ]
                 bulk_tweets = format_bulk_tweets(detector, bulk_deals)
 
                 if copy_to_clipboard(bulk_tweets):
                     mark_deals_posted(bulk_deals)
                     themed_print(f"{len(bulk_deals)} deal tweets copied to clipboard! You can now paste them on 𝕏.", "success")
                     themed_print("Marked those games as posted for more variety on future refreshes.", "muted")
+                    prompt_buffer_after_copy(bulk_tweet_list)
                 else:
                     themed_print("Could not copy the deal tweets to clipboard automatically.", "error")
                     if not _HAS_PYPERCLIP:
@@ -1204,7 +1419,7 @@ def main():
                 themed_input("\nPress Enter to continue...", "muted")
                 deal_index += len(bulk_deals)
 
-            elif choice == '8':
+            elif choice == str(8 + buffer_offset):
                 themed_print("Goodbye!", "success")
                 return
                 
