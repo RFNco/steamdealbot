@@ -17,6 +17,7 @@ All notable changes to SteamDealBot will be documented in this file.
 - Nintendo themed tweet ideas now use live Nintendo eShop US deals (with real storefront links), not template-only placeholders.
 - Prefixed the main menu Copy action with `📋 Copy tweet` for clearer scanning.
 - Rolled a few new reusable lines into `TWEET_IDEA_THEME_EXTRAS` for Steam, Nintendo, and Gaming.
+- Documented Termux Buffer setup: local `.env` with `BUFFER_API_KEY`, `python-dotenv`, and `nano` save/exit (`Ctrl+O` / `Ctrl+X`).
 
 ### Changed
 

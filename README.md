@@ -228,18 +228,45 @@ pkg update -y && pkg install -y python termux-api git
 git clone https://github.com/yourusername/steamdealbot.git
 cd steamdealbot
 # Minimal manual poster (Steam browse + clipboard)
-pip install requests beautifulsoup4 pyperclip
+pip install requests beautifulsoup4 pyperclip python-dotenv
 # Optional: Nintendo US deals menu
 pip install nintendeals
-# Optional: Buffer queue (needs BUFFER_API_KEY in .env; python-dotenv is in requirements.txt)
-# pip install python-dotenv
 # Run
 python manual_poster.py
 ```
 
 - Clipboard: With Termux:API installed, the script auto-uses `termux-clipboard-set` if `pyperclip` isn’t available.
-- Copy `.env` onto the phone if you use Buffer (or Twitter bot credentials locally). Do not commit that file.
 - You can also copy the folder via file manager and `cd` into it instead of cloning.
+
+**Buffer on Termux:** Buffer only appears if `.env` exists **in the same folder** as `manual_poster.py` and includes `BUFFER_API_KEY`. Cloning or copying just the `.py` files is not enough — `.env` is gitignored, so it is not included in git clone. Without it, Steam/Nintendo still work; you just will not see **Add to Buffer queue**.
+
+Create or edit `.env` with `nano`:
+
+```bash
+cd ~/path/to/steamdealbot   # your project folder
+nano .env
+```
+
+Type (or paste) at least:
+
+```env
+BUFFER_API_KEY=your_buffer_personal_api_key_here
+```
+
+In `nano` on Termux:
+
+1. Edit the file as needed.
+2. **Save:** `Ctrl+O`, then press **Enter** to confirm the filename.
+3. **Exit:** `Ctrl+X`.
+
+Then install dotenv if needed and run again:
+
+```bash
+pip install python-dotenv
+python manual_poster.py
+```
+
+Startup should show `Buffer queue: ready (API key loaded)`, and option **2** becomes **Add to Buffer queue**. Needs internet when queuing. Never commit `.env` or share the key.
 
 ## GitHub Actions Setup
 
