@@ -19,7 +19,8 @@ A Twitter (𝕏) bot that automatically finds and posts Steam game deals with de
 - **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
 - **Easy Setup**: Simple installation and deployment process
 - **280-Character Tweets**: Each deal tweet is auto-fitted to 280 characters (configurable in `steam_deals.py`)
-- **Manual Poster CLI**: Terminal tool (v2.1.6) with ASCII banner, collections, posted-game memory, Buffer queue support, and copy-to-clipboard for 𝕏
+- **Manual Poster CLI**: Terminal tool (v2.1.7) with ASCII banner, collections, posted-game memory, Buffer queue support, Gaming news (RSS), and copy-to-clipboard for 𝕏
+- **Gaming News (manual poster)**: RSS/Atom headlines under Collections & ideas → Gaming news (optional images; needs `feedparser`)
 
 ## Prerequisites
 
@@ -29,6 +30,7 @@ Before you begin, you'll need:
 2. Twitter API credentials (API Key, API Secret, Access Token, Access Token Secret, Bearer Token)
 3. Python 3.7+ installed locally (for testing)
 4. **`nintendeals`** (included in `requirements.txt`) if you want the manual poster **Nintendo US deals** menu
+5. **`feedparser`** (included in `requirements.txt`) if you want **Gaming news** under Collections & ideas
 
 ## Local Setup
 
@@ -47,6 +49,17 @@ cd steamdealbot
 pip install -r requirements.txt
 ```
 
+**macOS tip:** system shells often have `python3` / `pip3`, not `python` / `pip`. Prefer a project venv so both names work after activate:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # prompt shows (.venv)
+pip install -r requirements.txt
+python manual_poster.py
+```
+
+On Windows, `python` and `pip` usually work if Python was installed with “Add to PATH”; activate with `.\.venv\Scripts\activate` if you use a venv.
+
 **What each package in `requirements.txt` does:**
 
 | Package | Install command | Used for |
@@ -58,6 +71,7 @@ pip install -r requirements.txt
 | `lxml` | `pip install lxml` | Faster HTML parser backend for BeautifulSoup (used by `bot.py` / full install) |
 | `flask` | `pip install flask` | Running the optional web interface (`web_interface.py`) |
 | `nintendeals` | `pip install nintendeals` | **Nintendo US deals** in the manual poster (primary working source) |
+| `feedparser` | `pip install feedparser` | **Gaming news** RSS/Atom feeds under Collections & ideas |
 
 **Manual poster extras (not in `requirements.txt`, but recommended):**
 
@@ -153,7 +167,7 @@ Since the free Twitter API tier doesn't allow posting tweets, you can use these 
 python manual_poster.py
 ```
 
-On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.6** header, then an interactive loop to browse deals.
+On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.7** header, then an interactive loop to browse deals.
 
 **Features:**
 - ASCII banner on startup (©RFNco) with manual poster version label
@@ -164,8 +178,8 @@ On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.6
 - Amber `Posted` label on deal headers for recently copied games
 - Copy one tweet or bulk **Copy 5 deals** for faster posting
 - Optional Buffer queue: menu option **2** when `BUFFER_API_KEY` is set, plus an optional prompt after copy
-- Generate 5 themed tweet ideas, browse deal modes, or browse category collections under **Collections & ideas**
-- Search discounted Steam games by keyword, then copy one or more matching tweets; press **0** to search again
+- Generate 5 themed tweet ideas, browse deal modes, categories, or **Gaming news** (RSS) under **Collections & ideas**
+- Search discounted Steam games by keyword, then copy one or more matching tweets; empty results retry immediately, press **0** from a result list to search again
 - Open a separate Nintendo US deals menu (optional keyword) and copy Nintendo tweets — **requires `nintendeals`**
 - Steam, Nintendo, and general gaming ideas can all use live deal data (Steam for themes 1/3, Nintendo eShop for theme 2)
 - Character count per tweet shown as `242/280` (see [Tweet length limit](#tweet-length-limit))
@@ -299,11 +313,14 @@ steamdealbot/
 ├── bot.py                       # Main bot script
 ├── manual_poster.py             # Interactive manual poster
 ├── steam_deals.py               # Steam deal detection (latest version)
+├── news_feeds.py                # RSS/Atom gaming news for Collections & ideas
+├── buffer_client.py             # Optional Buffer queue helper
 ├── web_interface.py             # Web interface for manual posting
 ├── SteamDealBot.bat             # Desktop shortcut for Windows
 ├── CHANGELOG.md                 # Versioned change history
 ├── ROADMAP.md                   # Future improvement checklist
 ├── .manual_poster_posted.json   # Local copied-game history (created at runtime, gitignored)
+├── images/news/                 # Optional saved news images (gitignored)
 ├── requirements.txt             # Python dependencies
 └── README.md                   # This file
 ```
@@ -371,8 +388,9 @@ Use **Refresh** to fetch a fresh deal set before generating more ideas.
 - **Themed tweet ideas**: Steam, Nintendo, or general gaming idea batches
 - **Deal modes**: big names, popular indies, hidden gems, deep discounts
 - **Categories**: RPG, horror, co-op, cozy, strategy, under $5
+- **Gaming news**: RSS/Atom headlines (Steam, PC Gamer, Nintendo Life, Rock Paper Shotgun, …) → pick one → copy a Headline / Question / Hype tweet draft (`news_feeds.py`, needs `feedparser`). 10 headlines per page (**0** = next batch; re-fetches at end of pool). Question/Hype openers rotate across a phrase pool. Drafts use X’s weighted link length so headlines stay readable. Optional `[img]`/`[vid]` from the feed; save images to `images/news/` for manual attach on X.
 
-Each collection shows a numbered list with discount and price, supports multi-pick copy (`3`, `3,7`, or `3-5`), and uses the same tweet source labels as regular Steam deals (active sale name, or `Steam Specials`). After copy, Buffer-ready sessions can optionally queue the tweet(s).
+Deal collections show a numbered list with discount and price, support multi-pick copy (`3`, `3,7`, or `3-5`), and use the same tweet source labels as regular Steam deals (active sale name, or `Steam Specials`). After copy, Buffer-ready sessions can optionally queue the tweet(s).
 
 ### Posted-game memory
 
@@ -400,7 +418,7 @@ The manual poster can search discounted Steam games directly by keyword:
 Search discounted Steam games by keyword: Baldur
 ```
 
-The search uses Steam's specials endpoint with the keyword and only returns discounted matches. Results are shown as a compact numbered list with game title, discount, and price. You can copy one or more picks (`3`, `3,7`, or `3-5`) and stay in the same search to copy more. Press **0** to run another keyword search (including after zero results), or **Enter** to go back.
+The search uses Steam's specials endpoint with the keyword and only returns discounted matches. Results are shown as a compact numbered list with game title, discount, and price. You can copy one or more picks (`3`, `3,7`, or `3-5`) and stay in the same search to copy more. If nothing matches, you are prompted for a new keyword right away (no confirmation). Press **0** while viewing results to search again, or **Enter** on an empty keyword prompt to go back.
 
 ### Nintendo US deals menu
 
@@ -478,54 +496,64 @@ Disable all colors: set environment variable `STEAMDEALBOT_NO_COLOR=1`.
 
 ### Common Issues
 
-1. **"Missing required Twitter API credentials"**
+1. **"command not found: python" / "command not found: pip" (especially macOS)**
+   - On Mac, use `python3` and `pip3`, or activate a project venv first (`source .venv/bin/activate`) so `python` / `pip` point at that environment
+   - Create/refresh the venv if needed: `python3 -m venv .venv`, then `source .venv/bin/activate`, then `pip install -r requirements.txt`
+   - Cursor’s integrated terminal only “works” if that session already has the venv activated and deps installed — a regular Terminal window will not until you do the same
+   - Windows usually provides `python` / `pip` when Python is on PATH; still use `.\.venv\Scripts\activate` if you rely on a venv
+
+2. **"ModuleNotFoundError: No module named 'requests'" (or similar)**
+   - Dependencies are not installed for the Python you are running. With the venv active: `pip install -r requirements.txt`
+   - If install fails on `lxml` under Python 3.13, use current `requirements.txt` (`lxml>=5.3.0`)
+
+3. **"Missing required Twitter API credentials"**
    - Make sure all environment variables are set correctly
    - Check that your `.env` file is in the root directory
 
-2. **"Error posting tweet" / "403 Forbidden"**
+4. **"Error posting tweet" / "403 Forbidden"**
    - This is expected with the free Twitter API tier
    - You need to upgrade to Basic ($100/month) or Pro access level
    - Visit: https://developer.x.com/en/portal/product
    - The bot will still detect deals and show what would be posted
 
-3. **GitHub Actions failing**
+5. **GitHub Actions failing**
    - Double-check that all secrets are set in GitHub
    - Make sure the secret names match exactly (case-sensitive)
 
-4. **"No Steam deals found"**
+6. **"No Steam deals found"**
    - This can happen if Steam's API is down or changes
    - The bot will fall back to showing example deals
    - Check the deal detection logic in `steam_deals.py`
 
-5. **Same games repeating on refresh**
+7. **Same games repeating on refresh**
    - Deals are blended from popular/reviewed pages plus a capped discovery sample, so some high-signal games may appear more often by design
    - Copied games are also saved locally and deprioritized for 14 days to keep refreshes fresher
    - If you still see repeats, the paginated endpoint may have failed and the code fell back to the curated featured list — check the console for fetch errors
 
-6. **Missing descriptions or genre hashtags**
+8. **Missing descriptions or genre hashtags**
    - The session sets `birthtime`/`mature_content` cookies to bypass Steam's age gate; without them age-gated pages return no description/tags
    - Only the first `DESCRIPTION_ENRICH_LIMIT` deals get full descriptions/tags per refresh (others use a generated line); the deal actually tweeted is always enriched
 
-7. **Tweet looks cut off**
+9. **Tweet looks cut off**
    - Tweets are limited to `TWEET_MAX_LENGTH` (280 by default)
    - Shorten templates/descriptions if you want more room for manual edits
 
-8. **© symbol shows as a box in the manual poster banner**
+10. **© symbol shows as a box in the manual poster banner**
    - Use Windows Terminal or run `chcp 65001` before `python manual_poster.py` for UTF-8 output
 
-9. **"Nintendo US deals endpoint unavailable" / no Nintendo deals found**
+11. **"Nintendo US deals endpoint unavailable" / no Nintendo deals found**
    - If `nintendeals` is installed, the manual poster uses it directly and should not wait on the dead official API
    - Without `nintendeals`, install it: `pip install nintendeals`
    - Verify with: `python -c "import nintendeals; print('nintendeals OK')"`
    - If it still fails, reinstall from `requirements.txt` and try **Refresh** in the Nintendo menu again
 
-10. **Buffer queue not showing / failed to queue**
+12. **Buffer queue not showing / failed to queue**
    - Confirm `BUFFER_API_KEY` is set in `.env` next to the scripts, then restart `python manual_poster.py`
    - Startup should show `Buffer queue: ready (API key loaded)`
    - Free Buffer plans often cap the queue at 10 posts — clear a slot in Buffer if you get a queue-full error
    - Needs internet; personal API key scopes should include `account:read` and `posts:write`
 
-11. **Tweaking manual poster colors**
+13. **Tweaking manual poster colors**
    - Edit `ANSI_COLORS`, `THEME`, and `MENU_STYLES` in `manual_poster.py`, save, then run `python manual_poster.py --preview-colors`
    - Restart `python manual_poster.py` to see colors in the full app (colors do not hot-reload mid-session)
 
@@ -536,11 +564,12 @@ Disable all colors: set environment variable `STEAMDEALBOT_NO_COLOR=1`.
 - **Dynamic Source Label**: Seasonal sale name when active, else "Steam Specials"
 - **Genre Hashtags**: Up to 2 relevant game tags per tweet for reach
 - **Tweet Formatting**: 280-character cap, strikethrough original prices, clean Steam app URLs, and smart truncation
-- **Manual Posting**: ASCII banner CLI (v2.1.6), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
+- **Manual Posting**: ASCII banner CLI (v2.1.7), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
 - **Buffer Queue**: Optional manual-poster → Buffer X queue via `BUFFER_API_KEY` (menu option **2** + after-copy prompt)
 - **Tweet Ideas**: 5 themed non-AI ideas using templates plus live deal data for Steam, Nintendo eShop, and general gaming
 - **Collections**: Deal modes and category browsing for thread-style posting
-- **Keyword Search**: Search discounted Steam games by keyword and copy one or more matching tweets (`0` = search again)
+- **Gaming News**: RSS/Atom headlines (10/page, next-batch refresh), Headline/Question/Hype drafts, optional `[img]` save to `images/news/`
+- **Keyword Search**: Search discounted Steam games by keyword and copy one or more matching tweets (empty results retry immediately; **0** = search again from a result list)
 - **Nintendo US Deals**: Manual poster eShop US menu via `nintendeals` (15 deals per load, install required; discount % and storefront links fixed for accuracy)
 - **Terminal Color Preview**: `python manual_poster.py --preview-colors` for palette and menu samples
 - **Desktop Shortcut**: Easy one-click access on Windows

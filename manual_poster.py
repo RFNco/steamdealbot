@@ -21,6 +21,14 @@ from steam_deals import (
     DEAL_CATEGORY_CONFIGS,
 )
 from buffer_client import BufferClient
+from news_feeds import (
+    DEFAULT_NEWS_LIMIT,
+    fetch_news_pool,
+    format_news_tweets,
+    format_published_age,
+    media_badge,
+    save_news_image,
+)
 import json
 import re
 import time
@@ -43,7 +51,7 @@ except Exception:
     pyperclip = None  # type: ignore
     _HAS_PYPERCLIP = False
 
-VERSION = "v2.1.6"
+VERSION = "v2.1.7"
 
 # Lazily created when BUFFER_API_KEY is set in .env
 _BUFFER_CLIENT: Optional[BufferClient] = None
@@ -156,7 +164,7 @@ MENU_STYLES = {
 # Reusable themed tweet ideas (Collections & ideas). Before each version tag, add or
 # swap a few lines in TWEET_IDEA_THEME_EXTRAS, then bump TWEET_IDEA_LAST_ROLLED_VERSION
 # (and the matching version on ROADMAP.md) to match the release you are tagging.
-TWEET_IDEA_LAST_ROLLED_VERSION = "v2.1.6"
+TWEET_IDEA_LAST_ROLLED_VERSION = "v2.1.7"
 TWEET_IDEA_THEMES = {
     "1": (
         "Steam",
@@ -221,6 +229,8 @@ TWEET_IDEA_THEME_EXTRAS = {
         "Steam players: buy the comfort replay or gamble on something totally new? #Steam #Gaming",
         "Buffer-ready Steam question: which deal on your wishlist actually deserves a queue slot today? #SteamDeals",
         "Steam check: is the best find the big-name discount or the under-$10 surprise? #Steam #PCGaming",
+        "Sale-day honesty: did you open Steam to play, or to browse deals again? #SteamDeals #Gaming",
+        "One wishlisted game is on a real discount — grab it, or keep waiting for 'even lower'? #Steam #GameDeals",
     ],
     "2": [
         "Nintendo-style fun is all about games you can pick up anytime and still smile. What has that energy for you? #Nintendo",
@@ -246,6 +256,8 @@ TWEET_IDEA_THEME_EXTRAS = {
         "Nintendo fans: quick arcade session or settle in for a long RPG night? #Nintendo #Gaming",
         "eShop temptation check: grab the discount now or wait for an even deeper cut? #NintendoDeals #NintendoSwitch",
         "Switch deal night: one sale game, one comfort install, and no promises about sleep. #Nintendo #Gaming",
+        "eShop scroll tip: if the trailer makes you smile twice, it might be worth the sale price. #NintendoDeals",
+        "Handheld check: what Switch game still earns a permanent home-screen slot? #NintendoSwitch #Gaming",
     ],
     "3": [
         "Gaming backlog status: organized library or beautiful chaos? #Gaming #GameDeals",
@@ -271,6 +283,8 @@ TWEET_IDEA_THEME_EXTRAS = {
         "Gaming check-in: what are you playing tonight and why did you pick it? #Gaming",
         "Queue vs backlog: schedule one post-worthy deal or keep hunting for a better find? #GameDeals #Gaming",
         "Honest gaming mood: hype post, chill rec, or 'would you buy this?' poll energy tonight? #GamingCommunity",
+        "Timeline mix idea: one deal, one news take, one 'what are you playing?' — what wins today? #Gaming",
+        "If your feed only showed one game recommendation today, what should it be? #GamingCommunity #GameDeals",
     ],
 }
 for theme_key, extra_templates in TWEET_IDEA_THEME_EXTRAS.items():
@@ -685,15 +699,6 @@ def copy_collection_results(
     return copied
 
 
-def prompt_search_again() -> bool:
-    """Ask whether to run another keyword search (0) or leave (Enter)."""
-    choice = themed_input(
-        "\n0 = Search again, Enter = back: ",
-        MENU_STYLES["prompt"],
-    ).strip()
-    return choice == "0"
-
-
 def show_collection_copy_loop(
     detector: SteamDealDetector,
     title: str,
@@ -1059,11 +1064,197 @@ def show_deal_categories_menu(detector: SteamDealDetector) -> None:
         show_collection_copy_loop(detector, config["label"], deals)
 
 
+def show_news_menu() -> None:
+    """Browse RSS/Atom gaming headlines and copy a news tweet draft."""
+    pool: List[Dict] = []
+    fetch_errors: List[str] = []
+    offset = 0
+
+    def load_pool(force: bool = False) -> bool:
+        nonlocal pool, fetch_errors, offset
+        if pool and not force:
+            return True
+        themed_print("\nFetching gaming news from RSS feeds...", "muted")
+        try:
+            pool, fetch_errors = fetch_news_pool()
+        except Exception as exc:  # noqa: BLE001
+            themed_print(f"Could not load news feeds: {exc}", "error")
+            themed_input("\nPress Enter to go back...", "muted")
+            pool = []
+            return False
+        offset = 0
+        if not pool:
+            themed_print("No news items found right now.", "warning")
+            themed_input("\nPress Enter to go back...", "muted")
+            return False
+        return True
+
+    if not load_pool(force=True):
+        return
+
+    while True:
+        if not pool and not load_pool(force=True):
+            return
+
+        if offset >= len(pool):
+            offset = 0
+
+        items = pool[offset : offset + DEFAULT_NEWS_LIMIT]
+        if not items:
+            themed_print("No news items on this page.", "warning")
+            offset = 0
+            continue
+
+        page_start = offset + 1
+        page_end = offset + len(items)
+        print_menu_section_header(
+            "Gaming news",
+            f"Showing {page_start}-{page_end} of {len(pool)}. 0 = next batch.",
+        )
+        themed_print(
+            "X counts each link as 23 chars — drafts keep the full headline when possible.",
+            "muted",
+        )
+        if fetch_errors:
+            themed_print(
+                f"Note: {len(fetch_errors)} feed(s) failed; showing what loaded.",
+                "warning",
+            )
+
+        for index, item in enumerate(items, 1):
+            age = format_published_age(item.get("published"))
+            badge = media_badge(item)
+            badge_text = f" {badge}" if badge else ""
+            line = (
+                color_text(f"{index}. ", "muted")
+                + color_text(f"[{item['source']}] ", "label")
+                + color_text(item["title"], "value")
+                + color_text(f"{badge_text}  ({age})", "muted")
+            )
+            print(line)
+
+        pick = themed_input(
+            f"\nPick a headline (1-{len(items)}, 0=next batch, Enter=back): ",
+            MENU_STYLES["prompt"],
+        ).strip()
+        if not pick:
+            return
+        if pick == "0":
+            next_offset = offset + DEFAULT_NEWS_LIMIT
+            if next_offset >= len(pool):
+                themed_print(
+                    "Reached the end of this pool — fetching a fresh batch...",
+                    "muted",
+                )
+                if not load_pool(force=True):
+                    return
+            else:
+                offset = next_offset
+                themed_print(
+                    f"Next batch ({offset + 1}-{min(offset + DEFAULT_NEWS_LIMIT, len(pool))} of {len(pool)}).",
+                    "muted",
+                )
+            continue
+
+        try:
+            item_index = int(pick)
+        except ValueError:
+            themed_print("Invalid headline number.", "error")
+            continue
+        if item_index < 1 or item_index > len(items):
+            themed_print("Invalid headline number.", "error")
+            continue
+
+        item = items[item_index - 1]
+        drafts = format_news_tweets(item)
+
+        themed_print(f"\n[{item['source']}] {item['title']}", "title")
+        themed_print(item["url"], "muted")
+        if item.get("summary"):
+            summary = item["summary"]
+            themed_print(
+                summary[:160] + ("..." if len(summary) > 160 else ""),
+                "value",
+            )
+        if item.get("image_url"):
+            themed_print(f"Image: {item['image_url']}", "muted")
+        if item.get("video_url"):
+            themed_print(f"Video: {item['video_url']}", "muted")
+        if not item.get("image_url") and not item.get("video_url"):
+            themed_print("No image/video in this feed item.", "muted")
+        themed_print("-" * 30, "muted")
+
+        for draft_index, draft in enumerate(drafts, 1):
+            weighted = draft.get("weighted_length", len(draft["text"]))
+            themed_print(
+                f"{draft_index}. {draft['label']} ({weighted}/{TWEET_MAX_LENGTH} on X)",
+                "label",
+            )
+            print_tweet_preview(draft["text"])
+            themed_print("-" * 30, "muted")
+
+        save_hint = ", s=save image" if item.get("image_url") else ""
+        draft_pick = themed_input(
+            f"Copy which draft? (1-{len(drafts)}{save_hint}, Enter=back to list): ",
+            MENU_STYLES["prompt"],
+        ).strip().lower()
+        if not draft_pick:
+            continue
+
+        if draft_pick == "s":
+            if not item.get("image_url"):
+                themed_print("No image available for this headline.", "warning")
+            else:
+                try:
+                    saved = save_news_image(item)
+                    if saved:
+                        themed_print(f"Image saved: {saved}", "success")
+                        themed_print(
+                            "Attach it manually when posting on X (optional).",
+                            "muted",
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    themed_print(f"Could not save image: {exc}", "error")
+            themed_input("\nPress Enter to continue...", "muted")
+            continue
+
+        try:
+            draft_index = int(draft_pick)
+        except ValueError:
+            themed_print("Invalid draft number.", "error")
+            continue
+        if draft_index < 1 or draft_index > len(drafts):
+            themed_print("Invalid draft number.", "error")
+            continue
+
+        selected = drafts[draft_index - 1]["text"]
+        if copy_to_clipboard(selected):
+            themed_print(f"{drafts[draft_index - 1]['label']} draft copied!", "success")
+            if item.get("image_url"):
+                save_now = themed_input(
+                    "Also save image for this post? (y/N): ",
+                    MENU_STYLES["prompt"],
+                ).strip().lower()
+                if save_now in {"y", "yes"}:
+                    try:
+                        saved = save_news_image(item)
+                        if saved:
+                            themed_print(f"Image saved: {saved}", "success")
+                    except Exception as exc:  # noqa: BLE001
+                        themed_print(f"Could not save image: {exc}", "error")
+            prompt_buffer_after_copy([selected])
+        else:
+            themed_print("Could not copy that draft automatically.", "error")
+            themed_print("Please manually copy the selected draft above if needed.", "warning")
+        themed_input("\nPress Enter to continue...", "muted")
+
+
 def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> None:
     collections_options = [
         (1, "Themed tweet ideas", "engagement posts using current deals"),
         (2, "Deal modes", "big names, indies, hidden gems, deep discounts"),
         (3, "Categories", "RPG, horror, co-op, cozy, strategy, under $5"),
+        (4, "Gaming news", "RSS headlines → tweet drafts"),
     ]
 
     while True:
@@ -1081,6 +1272,8 @@ def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> Non
             show_deal_modes_menu(detector)
         elif choice == "3":
             show_deal_categories_menu(detector)
+        elif choice == "4":
+            show_news_menu()
         else:
             themed_print("Invalid choice. Please try again.", "error")
 
@@ -1095,9 +1288,7 @@ def show_keyword_search_menu(detector: SteamDealDetector) -> None:
         results = detector.search_discounted_games(keyword)
         if not results:
             themed_print(f"No discounted games found for \"{keyword}\" right now.", "warning")
-            if prompt_search_again():
-                continue
-            return
+            continue
 
         action = show_collection_copy_loop(
             detector,
@@ -1185,21 +1376,20 @@ def show_nintendo_deals_menu(detector: SteamDealDetector) -> None:
         if choice == str(3 + buffer_offset):
             while True:
                 new_keyword = themed_input(
-                    "\nNintendo keyword (Enter for all deals): "
+                    "\nSearch Nintendo deals by keyword (Enter = back): "
                 ).strip()
+                if not new_keyword:
+                    break
+
                 new_results = fetch_nintendo_deals(new_keyword)
                 if not new_results:
                     themed_print(
                         "No Nintendo discounted games found for that search.",
                         "warning",
                     )
-                    if prompt_search_again():
-                        continue
-                    break
+                    continue
 
-                search_title = "Nintendo US discounted deals"
-                if new_keyword:
-                    search_title += f' for "{new_keyword}"'
+                search_title = f'Nintendo US discounted deals for "{new_keyword}"'
                 action = show_collection_copy_loop(
                     detector,
                     search_title,

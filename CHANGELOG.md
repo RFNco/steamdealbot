@@ -8,6 +8,31 @@ All notable changes to SteamDealBot will be documented in this file.
 
 ---
 
+## [v2.1.7] - 16-07-2026
+
+### Added
+
+- **Gaming news** under Collections & ideas → **Gaming news** (`news_feeds.py` + `feedparser`):
+  - RSS/Atom from Steam, Steam Client, PC Gamer, Nintendo Life, and Rock Paper Shotgun
+  - Normalized fields (source, title, URL, published, summary) plus optional feed `image` / `video`
+  - Browse 10 headlines per page from a ~50-item pool; **0** = next batch (re-fetches when the pool ends)
+  - Copy Headline / Question / Hype drafts; Question/Hype openers rotate from phrase pools
+  - Optional media: `[img]` / `[vid]` badges; save images to `images/news/` (`s` or after copy)
+
+### Changed
+
+- Keyword search (Steam and Nintendo): **0 results** skips confirmation and prompts for another keyword immediately; empty Enter still exits.
+- News tweet fitting uses X’s weighted URL length (each link ≈ 23 chars) so headlines stay long and engaging.
+- Bumped `lxml` to `>=5.3.0` for Python 3.13 installs (`4.9.3` failed to build).
+- Rolled a few tweet-idea extras and news opener lines for v2.1.7.
+
+### Docs
+
+- README: macOS `python`/`pip` vs `python3`/`pip3`, project `.venv` setup, news feature notes, troubleshooting for missing deps.
+- ROADMAP: marked shipped News & Trends items (pipeline, normalize, submenu, templates, optional media).
+
+---
+
 ## [v2.1.6] - 14-07-2026
 
 ### Added
