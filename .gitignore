@@ -59,6 +59,7 @@ logs/
 *.tmp
 *.temp
 .manual_poster_posted.json
+.manual_poster_posted_news.json
 
 # Downloaded news/deal media (optional local attach for X)
 images/

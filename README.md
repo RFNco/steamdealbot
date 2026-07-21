@@ -19,8 +19,8 @@ A Twitter (𝕏) bot that automatically finds and posts Steam game deals with de
 - **Secure Credential Management**: Uses GitHub Secrets for production, .env for local development
 - **Easy Setup**: Simple installation and deployment process
 - **280-Character Tweets**: Each deal tweet is auto-fitted to 280 characters (configurable in `steam_deals.py`)
-- **Manual Poster CLI**: Terminal tool (v2.1.7) with ASCII banner, collections, posted-game memory, Buffer queue support, Gaming news (RSS), and copy-to-clipboard for 𝕏
-- **Gaming News (manual poster)**: RSS/Atom headlines under Collections & ideas → Gaming news (optional images; needs `feedparser`)
+- **Manual Poster CLI**: Terminal tool (v2.1.8) with ASCII banner, collections, posted-game memory, Buffer queue support, Gaming news (RSS), and copy-to-clipboard for 𝕏
+- **Gaming News (manual poster)**: RSS/Atom headlines via main menu **Gaming news** (optional images; needs `feedparser`)
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ Before you begin, you'll need:
 2. Twitter API credentials (API Key, API Secret, Access Token, Access Token Secret, Bearer Token)
 3. Python 3.7+ installed locally (for testing)
 4. **`nintendeals`** (included in `requirements.txt`) if you want the manual poster **Nintendo US deals** menu
-5. **`feedparser`** (included in `requirements.txt`) if you want **Gaming news** under Collections & ideas
+5. **`feedparser`** (included in `requirements.txt`) if you want **Gaming news** on the main menu
 
 ## Local Setup
 
@@ -71,7 +71,7 @@ On Windows, `python` and `pip` usually work if Python was installed with “Add 
 | `lxml` | `pip install lxml` | Faster HTML parser backend for BeautifulSoup (used by `bot.py` / full install) |
 | `flask` | `pip install flask` | Running the optional web interface (`web_interface.py`) |
 | `nintendeals` | `pip install nintendeals` | **Nintendo US deals** in the manual poster (primary working source) |
-| `feedparser` | `pip install feedparser` | **Gaming news** RSS/Atom feeds under Collections & ideas |
+| `feedparser` | `pip install feedparser` | **Gaming news** RSS/Atom feeds on the main menu |
 
 **Manual poster extras (not in `requirements.txt`, but recommended):**
 
@@ -167,7 +167,7 @@ Since the free Twitter API tier doesn't allow posting tweets, you can use these 
 python manual_poster.py
 ```
 
-On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.7** header, then an interactive loop to browse deals.
+On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.8** header, then an interactive loop to browse deals.
 
 **Features:**
 - ASCII banner on startup (©RFNco) with manual poster version label
@@ -175,12 +175,13 @@ On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.7
 - Shows real Steam deals with USD prices
 - Different games on every refresh (random sampling of Steam's specials)
 - Posted-game memory: copied tweets are saved locally and recently copied games move to the end for more variety
-- Amber `Posted` label on deal headers for recently copied games
-- Copy one tweet or bulk **Copy 5 deals** for faster posting
+- Magenta `Posted` label before the game name for recently copied deals (same pattern as Gaming news)
+- Copy one tweet for posting
 - Optional Buffer queue: menu option **2** when `BUFFER_API_KEY` is set, plus an optional prompt after copy
-- Generate 5 themed tweet ideas, browse deal modes, categories, or **Gaming news** (RSS) under **Collections & ideas**
+- Generate 5 themed tweet ideas, browse deal modes, or categories under **Collections & ideas**
 - Search discounted Steam games by keyword, then copy one or more matching tweets; empty results retry immediately, press **0** from a result list to search again
 - Open a separate Nintendo US deals menu (optional keyword) and copy Nintendo tweets — **requires `nintendeals`**
+- Open **Gaming news** (RSS) from the main menu for faster headline access
 - Steam, Nintendo, and general gaming ideas can all use live deal data (Steam for themes 1/3, Nintendo eShop for theme 2)
 - Character count per tweet shown as `242/280` (see [Tweet length limit](#tweet-length-limit))
 - Clipboard fallbacks: pyperclip, Termux, macOS `pbcopy`, Windows `clip`
@@ -196,11 +197,11 @@ On launch you get an ASCII **STEAM DEAL BOT** banner, a **Manual Poster - v2.1.7
 5. Refresh
 6. Collections & ideas
 7. Nintendo US deals
-8. Copy 5 deals
+8. Gaming news
 9. Exit
 ```
 
-Without Buffer, option 2 is omitted and the rest keep their original numbers (Search=`3`, Refresh=`4`). Steam and Nintendo stay aligned.
+Without Buffer, option 2 is omitted and the rest keep their original numbers (Search=`3`, Refresh=`4`, Gaming news=`7`, Exit=`8`). Steam and Nintendo stay aligned.
 
 **Preview terminal colors** (no deal fetch — useful while tuning `ANSI_COLORS` / `THEME` / `MENU_STYLES`):
 
@@ -313,7 +314,7 @@ steamdealbot/
 ├── bot.py                       # Main bot script
 ├── manual_poster.py             # Interactive manual poster
 ├── steam_deals.py               # Steam deal detection (latest version)
-├── news_feeds.py                # RSS/Atom gaming news for Collections & ideas
+├── news_feeds.py                # RSS/Atom gaming news for the main-menu Gaming news option
 ├── buffer_client.py             # Optional Buffer queue helper
 ├── web_interface.py             # Web interface for manual posting
 ├── SteamDealBot.bat             # Desktop shortcut for Windows
@@ -386,29 +387,36 @@ Use **Refresh** to fetch a fresh deal set before generating more ideas.
 **Collections & ideas** opens a second menu for thread-style content (main-menu number is **5** without Buffer, **6** with Buffer):
 
 - **Themed tweet ideas**: Steam, Nintendo, or general gaming idea batches
-- **Deal modes**: big names, popular indies, hidden gems, deep discounts
-- **Categories**: RPG, horror, co-op, cozy, strategy, under $5
-- **Gaming news**: RSS/Atom headlines (Steam, PC Gamer, Nintendo Life, Rock Paper Shotgun, …) → pick one → copy a Headline / Question / Hype tweet draft (`news_feeds.py`, needs `feedparser`). 10 headlines per page (**0** = next batch; re-fetches at end of pool). Question/Hype openers rotate across a phrase pool. Drafts use X’s weighted link length so headlines stay readable. Optional `[img]`/`[vid]` from the feed; save images to `images/news/` for manual attach on X.
+- **Deal modes**: big names, popular indies, hidden gems, deep discounts, under $10, 50%+ off favorites
+- **Categories**: RPG, horror, co-op, cozy, strategy, action, open world, under $5
 
 Deal collections show a numbered list with discount and price, support multi-pick copy (`3`, `3,7`, or `3-5`), and use the same tweet source labels as regular Steam deals (active sale name, or `Steam Specials`). After copy, Buffer-ready sessions can optionally queue the tweet(s).
+
+### Gaming news
+
+Open from the main menu: **Gaming news** (**7** without Buffer, **8** with Buffer).
+
+RSS/Atom headlines (Stathetic Blog, Steam, PC Gamer, Nintendo Life, Rock Paper Shotgun, Eurogamer, Polygon, Xbox Wire, PlayStation Blog, Gematsu, VG247, IGN, GameSpot, …) → pick one → copy a Headline / Question / Hype tweet draft (`news_feeds.py`, needs `feedparser`). 10 headlines per page (**0** = next batch; re-fetches at end of pool). Your **Stathetic Blog** posts only appear when newer than **2 days**; up to 3 fresh ones are lightly pinned near the top. Question/Hype openers rotate across a phrase pool. Drafts use X’s weighted link length so headlines stay readable. Optional `[img]`/`[vid]` from the feed; save images to `images/news/` for manual attach on X (Cloudflare-blocked CDNs fall back to URL/browser). After copy, Buffer is offered first; save-image is only asked if Buffer is skipped. Copied headlines are marked **Posted** for 14 days (`.manual_poster_posted_news.json`) and moved to the end of the pool.
 
 ### Posted-game memory
 
 When you copy a deal tweet, the manual poster saves it to a local `.manual_poster_posted.json` file next to `manual_poster.py` (gitignored). For the next 14 days:
 
 - Recently copied games are moved to the end of the list on refresh/restart
-- Deal headers show an amber `Posted` label when that game appears again
+- Deal headers and collection lists show a magenta `Posted` label **before** the game name when that game appears again
 
-**Updating the manual poster (phone, Termux, or desktop):** keep that one file. Replace `manual_poster.py` (and `steam_deals.py` if you use it), but do not delete `.manual_poster_posted.json` in the same folder. If you move the project to a new directory, copy the JSON into the new folder beside the script — the poster does not read history from anywhere else.
+Gaming news uses a separate `.manual_poster_posted_news.json` file with the same 14-day window and a `Posted` tag before the source name.
+
+**Updating the manual poster (phone, Termux, or desktop):** keep those JSON files. Replace `manual_poster.py` (and `steam_deals.py` / `news_feeds.py` if you use them), but do not delete `.manual_poster_posted.json` or `.manual_poster_posted_news.json` in the same folder. If you move the project to a new directory, copy the JSON into the new folder beside the script — the poster does not read history from anywhere else.
 
 Quick check after an update:
 
 ```bash
-ls -la .manual_poster_posted.json
+ls -la .manual_poster_posted.json .manual_poster_posted_news.json
 python manual_poster.py
 ```
 
-If **Posted** tags are missing, the JSON is probably in a different folder than the new script, the folder was wiped and only `.py` files were copied back, or the entries are older than 14 days. Back up `.manual_poster_posted.json` before major updates if you want a safety copy.
+If **Posted** tags are missing, the JSON is probably in a different folder than the new script, the folder was wiped and only `.py` files were copied back, or the entries are older than 14 days. Back up both posted JSON files before major updates if you want a safety copy.
 
 ### Keyword deal search
 
@@ -464,7 +472,7 @@ To customize the bot for your needs:
 8. **Adjust the schedule**: Edit the cron expression in `.github/workflows/bot.yml`
 9. **Modify deal selection**: Change the sorting logic in `get_best_deal_tweet()`
 10. **Customize manual poster colors**: Edit `ANSI_COLORS`, `THEME`, and `MENU_STYLES` at the top of `manual_poster.py` (preview with `python manual_poster.py --preview-colors`)
-11. **Customize manual poster content**: Edit `BANNER`, prompts, `BULK_COPY_COUNT`, or tweet idea templates in `manual_poster.py` (`TWEET_IDEA_THEME_EXTRAS` — refresh a few lines each release and bump `TWEET_IDEA_LAST_ROLLED_VERSION` + the version on `ROADMAP.md`)
+11. **Customize manual poster content**: Edit `BANNER`, prompts, or tweet idea templates in `manual_poster.py` (`TWEET_IDEA_THEME_EXTRAS` — refresh a few lines each release and bump `TWEET_IDEA_LAST_ROLLED_VERSION` + the version on `ROADMAP.md`)
 12. **Modify web interface**: Update the HTML template in `web_interface.py`
 
 ### Manual poster terminal colors
@@ -564,11 +572,11 @@ Disable all colors: set environment variable `STEAMDEALBOT_NO_COLOR=1`.
 - **Dynamic Source Label**: Seasonal sale name when active, else "Steam Specials"
 - **Genre Hashtags**: Up to 2 relevant game tags per tweet for reach
 - **Tweet Formatting**: 280-character cap, strikethrough original prices, clean Steam app URLs, and smart truncation
-- **Manual Posting**: ASCII banner CLI (v2.1.7), posted-game memory, collections, single/bulk clipboard copy, `current/280` length display
+- **Manual Posting**: ASCII banner CLI (v2.1.8), posted-game memory, collections, clipboard copy, `current/280` length display
 - **Buffer Queue**: Optional manual-poster → Buffer X queue via `BUFFER_API_KEY` (menu option **2** + after-copy prompt)
 - **Tweet Ideas**: 5 themed non-AI ideas using templates plus live deal data for Steam, Nintendo eShop, and general gaming
 - **Collections**: Deal modes and category browsing for thread-style posting
-- **Gaming News**: RSS/Atom headlines (10/page, next-batch refresh), Headline/Question/Hype drafts, optional `[img]` save to `images/news/`
+- **Gaming News**: Main-menu RSS/Atom headlines (10/page, next-batch refresh), Headline/Question/Hype drafts, Stathetic Blog freshness pin, optional `[img]` save to `images/news/`
 - **Keyword Search**: Search discounted Steam games by keyword and copy one or more matching tweets (empty results retry immediately; **0** = search again from a result list)
 - **Nintendo US Deals**: Manual poster eShop US menu via `nintendeals` (15 deals per load, install required; discount % and storefront links fixed for accuracy)
 - **Terminal Color Preview**: `python manual_poster.py --preview-colors` for palette and menu samples

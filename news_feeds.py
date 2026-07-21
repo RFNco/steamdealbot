@@ -23,17 +23,22 @@ import requests
 
 from steam_deals import TWEET_MAX_LENGTH
 
-USER_AGENT = "SteamDealBot/2.1.7 (+news reader; https://github.com/rfnco/steamdealbot)"
+USER_AGENT = "SteamDealBot/2.1.8 (+news reader; https://github.com/rfnco/steamdealbot)"
 REQUEST_TIMEOUT = 20
 DEFAULT_NEWS_LIMIT = 10
 # Fetch a larger merged pool so Refresh can rotate to the next page.
-NEWS_POOL_LIMIT = 50
+NEWS_POOL_LIMIT = 80
 # X counts each http(s) URL as this many characters regardless of real length.
 TWITTER_URL_LENGTH = 23
 NEWS_IMAGES_DIR = Path(__file__).resolve().parent / "images" / "news"
 
-# Keep this list small and gaming-focused for the first slice.
+# Gaming-focused RSS/Atom sources (fetched with a browser-like User-Agent).
 DEFAULT_FEEDS: List[Dict[str, str]] = [
+    {
+        "id": "stathetic",
+        "name": "Stathetic Blog",
+        "url": "https://stathetic.blogspot.com/feeds/posts/default?alt=rss",
+    },
     {"id": "steam", "name": "Steam", "url": "https://store.steampowered.com/feeds/news.xml"},
     {
         "id": "steam_client",
@@ -51,7 +56,29 @@ DEFAULT_FEEDS: List[Dict[str, str]] = [
         "name": "Rock Paper Shotgun",
         "url": "https://www.rockpapershotgun.com/feed",
     },
+    {"id": "eurogamer", "name": "Eurogamer", "url": "https://www.eurogamer.net/feed"},
+    {"id": "polygon", "name": "Polygon", "url": "https://www.polygon.com/rss/index.xml"},
+    {"id": "xboxwire", "name": "Xbox Wire", "url": "https://news.xbox.com/en-us/feed/"},
+    {
+        "id": "playstation",
+        "name": "PlayStation Blog",
+        "url": "https://blog.playstation.com/feed/",
+    },
+    {"id": "gematsu", "name": "Gematsu", "url": "https://www.gematsu.com/feed"},
+    {"id": "vg247", "name": "VG247", "url": "https://www.vg247.com/feed"},
+    {"id": "ign", "name": "IGN", "url": "https://feeds.ign.com/ign/games-all"},
+    {
+        "id": "gamespot",
+        "name": "GameSpot",
+        "url": "https://www.gamespot.com/feeds/news/",
+    },
 ]
+
+# Pin a few of your own blog posts near the top so high-volume outlets don't bury them.
+# Only include owned posts newer than this age (stale blog posts stay hidden).
+OWNED_FEED_IDS = {"stathetic"}
+OWNED_FEED_PIN_COUNT = 3
+OWNED_FEED_MAX_AGE_DAYS = 2
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
@@ -71,7 +98,8 @@ QUESTION_OPENERS = [
     "Anyone else seeing this?",
     "Worth weighing in?",
     "Does this change anything for you?",
-    "Bookmark or skip?",
+    "Hype or overblown?",
+    "Playing this weekend or skipping?",
 ]
 
 HYPE_OPENERS = [
@@ -83,7 +111,8 @@ HYPE_OPENERS = [
     "Fresh headline:",
     "On the timeline:",
     "Passing this along:",
-    "Quick news hit:",
+    "Just dropped:",
+    "Don't sleep on this:",
 ]
 
 
@@ -276,6 +305,47 @@ def fetch_feed(feed: Dict[str, str], session: Optional[requests.Session] = None)
     return items
 
 
+def _owned_feed_is_fresh(item: Dict, now: Optional[datetime] = None) -> bool:
+    """Owned-blog posts only appear when newer than OWNED_FEED_MAX_AGE_DAYS."""
+    published = item.get("published")
+    if not published:
+        return False
+    now = now or datetime.now(timezone.utc)
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    age = now - published.astimezone(timezone.utc)
+    return age.total_seconds() < (OWNED_FEED_MAX_AGE_DAYS * 86400)
+
+
+def _filter_and_prioritize_owned_feeds(items: List[Dict]) -> List[Dict]:
+    """Drop stale owned-blog posts; pin a few fresh ones near the top."""
+    if not items or not OWNED_FEED_IDS:
+        return items
+
+    now = datetime.now(timezone.utc)
+    fresh_owned: List[Dict] = []
+    others: List[Dict] = []
+    for item in items:
+        if item.get("source_id") in OWNED_FEED_IDS:
+            if _owned_feed_is_fresh(item, now=now):
+                fresh_owned.append(item)
+            # else: hide stale owned posts entirely
+        else:
+            others.append(item)
+
+    if not fresh_owned or OWNED_FEED_PIN_COUNT <= 0:
+        return fresh_owned + others if fresh_owned else others
+
+    pin = fresh_owned[:OWNED_FEED_PIN_COUNT]
+    pinned_urls = {(item.get("url") or "").rstrip("/").lower() for item in pin}
+    rest = [
+        item
+        for item in (fresh_owned + others)
+        if (item.get("url") or "").rstrip("/").lower() not in pinned_urls
+    ]
+    return pin + rest
+
+
 def fetch_news_pool(
     feeds: Optional[Sequence[Dict[str, str]]] = None,
     pool_limit: int = NEWS_POOL_LIMIT,
@@ -305,6 +375,7 @@ def fetch_news_pool(
         key=lambda item: item["published"] or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
+    unique = _filter_and_prioritize_owned_feeds(unique)
     return unique[: max(1, pool_limit)], errors
 
 
@@ -457,6 +528,36 @@ def format_news_tweets(item: Dict) -> List[Dict[str, str]]:
     return drafts
 
 
+class NewsImageBlockedError(RuntimeError):
+    """Raised when an image CDN returns a bot challenge (e.g. Cloudflare)."""
+
+    def __init__(self, message: str, image_url: str = ""):
+        super().__init__(message)
+        self.image_url = image_url
+
+
+def _looks_like_image_bytes(content: bytes, content_type: str) -> bool:
+    ctype = (content_type or "").lower()
+    if content_type and "html" in ctype:
+        return False
+    if content[:20].lstrip().lower().startswith((b"<!doctype", b"<html")):
+        return False
+    if b"just a moment" in content[:800].lower() or b"cloudflare" in content[:800].lower():
+        return False
+    if ctype.startswith("image/"):
+        return True
+    # Magic bytes for common formats when CDN omits/mislabels content-type.
+    if content.startswith(b"\xff\xd8\xff"):
+        return True  # jpeg
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return True
+    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return True
+    return False
+
+
 def save_news_image(item: Dict, destination_dir: Optional[Path] = None) -> Optional[str]:
     """Download the article image when available. Returns saved path or None."""
     image_url = item.get("image_url")
@@ -477,11 +578,34 @@ def save_news_image(item: Dict, destination_dir: Optional[Path] = None) -> Optio
     filename = f"{stamp}-{source_id}-{slug}{ext}"
     path = dest_dir / filename
 
+    article_url = (item.get("url") or "").strip()
+    referer = article_url or f"{parsed.scheme}://{parsed.netloc}/"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": referer,
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
     response = requests.get(
         image_url,
-        headers={"User-Agent": USER_AGENT},
+        headers=headers,
         timeout=REQUEST_TIMEOUT,
     )
+    content_type = response.headers.get("Content-Type", "")
+    if response.status_code == 403 or not _looks_like_image_bytes(
+        response.content, content_type
+    ):
+        host = parsed.netloc or "this source"
+        raise NewsImageBlockedError(
+            f"{host} blocked the image download (often Cloudflare). "
+            "Open the image URL in a browser and save it manually.",
+            image_url=image_url,
+        )
     response.raise_for_status()
     path.write_bytes(response.content)
     return str(path)

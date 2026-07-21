@@ -69,6 +69,16 @@ DEAL_MODE_CONFIGS = {
         "label": "Deep discounts",
         "blurb": "Highest discount percentages",
     },
+    "under_10": {
+        "label": "Under $10",
+        "blurb": "Budget picks priced at $10 or less",
+        "max_price_usd": 10.0,
+    },
+    "half_off_plus": {
+        "label": "50%+ off favorites",
+        "blurb": "Popular games with at least half off",
+        "min_discount": 50,
+    },
 }
 DEAL_CATEGORY_CONFIGS = {
     "rpg": {
@@ -95,6 +105,16 @@ DEAL_CATEGORY_CONFIGS = {
         "label": "Strategy",
         "blurb": "Strategy games on sale",
         "tags": "9",
+    },
+    "action": {
+        "label": "Action",
+        "blurb": "Action games on sale",
+        "tags": "19",
+    },
+    "open_world": {
+        "label": "Open world",
+        "blurb": "Open-world games on sale",
+        "tags": "1695",
     },
     "under_5": {
         "label": "Under $5",
@@ -1074,41 +1094,151 @@ class SteamDealDetector:
 
         print_progress(f"Loading {config['label']}...")
         deals = []
+        pool_count = max(count * 3, 60)
 
         if mode_key == "big_names":
-            for sort_by, start in POPULAR_SEARCH_PAGES[:3]:
-                deals.extend(self._get_specials_page(start=start, count=20, sort_by=sort_by))
-        elif mode_key == "popular_indies":
-            data = self._fetch_search_results_json(
-                start=0,
-                count=max(count * 2, 50),
-                sort_by="Reviews_DESC",
-                tags="492",
+            # Different popular pages + light start jitter each load (Nintendo-style variety).
+            pages = random.sample(
+                POPULAR_SEARCH_PAGES, k=min(3, len(POPULAR_SEARCH_PAGES))
             )
-            if data and data.get('results_html'):
-                source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
-                deals = self._parse_search_results_html(data['results_html'], source_label)
+            for sort_by, start in pages:
+                jitter = random.choice([0, 10, 25])
+                deals.extend(
+                    self._get_specials_page(
+                        start=max(0, start + jitter),
+                        count=25,
+                        sort_by=sort_by,
+                    )
+                )
+            # One extra discovery slice so refreshes are not only the same top block.
+            discovery_sort = random.choice(DISCOVERY_SEARCH_SORTS)
+            discovery_start = random.choice([0, 50, 100, 150, 200])
+            deals.extend(
+                self._get_specials_page(
+                    start=discovery_start,
+                    count=25,
+                    sort_by=discovery_sort,
+                )
+            )
+        elif mode_key == "popular_indies":
+            starts = random.sample([0, 25, 50, 75, 100, 125], k=2)
+            for start in starts:
+                data = self._fetch_search_results_json(
+                    start=start,
+                    count=max(pool_count // 2, 40),
+                    sort_by="Reviews_DESC",
+                    tags="492",
+                )
+                if data and data.get("results_html"):
+                    source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
+                    deals.extend(
+                        self._parse_search_results_html(
+                            data["results_html"], source_label
+                        )
+                    )
         elif mode_key == "hidden_gems":
-            sort_by = random.choice(["Released_DESC", "Reviews_DESC"])
+            sort_by = random.choice(["Released_DESC", "Reviews_DESC", ""])
             total = self.get_total_specials_count()
-            page_count = max(count, 25)
+            page_count = max(pool_count // 2, 30)
+            starts = []
             if total and total > page_count:
                 min_start = 150
                 max_start = min(max(0, total - page_count), 2500)
-                start = random.randint(min_start, max_start) if max_start > min_start else min_start
+                if max_start > min_start:
+                    starts = sorted(
+                        {
+                            random.randint(min_start, max_start)
+                            for _ in range(2)
+                        }
+                    )
+                else:
+                    starts = [min_start]
             else:
-                start = 150
-            deals = self._get_specials_page(start=start, count=page_count, sort_by=sort_by)
+                starts = [150, 250]
+            for start in starts:
+                deals.extend(
+                    self._get_specials_page(
+                        start=start, count=page_count, sort_by=sort_by
+                    )
+                )
         elif mode_key == "deep_discounts":
-            for start in (0, 50, 100, 150):
-                deals.extend(self._get_specials_page(start=start, count=30, sort_by="Reviews_DESC"))
+            # Randomized pages so the ≥70% pool is not always the same first 150.
+            max_start = 500
+            starts = sorted({random.randint(0, max_start) for _ in range(4)})
+            for start in starts:
+                sort_by = random.choice(["Reviews_DESC", "", "Released_DESC"])
+                deals.extend(
+                    self._get_specials_page(
+                        start=start, count=30, sort_by=sort_by
+                    )
+                )
             deals = [
-                deal for deal in deals
+                deal
+                for deal in deals
                 if self._discount_percent_from_deal(deal) >= 70
             ]
-            deals.sort(key=self._discount_percent_from_deal, reverse=True)
+        elif mode_key == "under_10":
+            max_price = float(config.get("max_price_usd") or 10.0)
+            pages = random.sample(
+                POPULAR_SEARCH_PAGES, k=min(3, len(POPULAR_SEARCH_PAGES))
+            )
+            for sort_by, start in pages:
+                jitter = random.choice([0, 10, 25])
+                deals.extend(
+                    self._get_specials_page(
+                        start=max(0, start + jitter),
+                        count=25,
+                        sort_by=sort_by,
+                    )
+                )
+            total = self.get_total_specials_count()
+            max_start = min(max(0, (total or 1000) - 50), 1200)
+            for _ in range(3):
+                start = random.randint(0, max_start) if max_start > 0 else 0
+                sort_by = random.choice(["Reviews_DESC", "", "Released_DESC"])
+                deals.extend(
+                    self._get_specials_page(start=start, count=50, sort_by=sort_by)
+                )
+            deals = self._sample_deals_across_price_buckets(
+                deals, max_price, count=count
+            )
+            if not deals:
+                return []
+            usual_source = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
+            for deal in deals:
+                deal["source"] = usual_source
+            self._enrich_descriptions(deals)
+            print_progress(f"Found {len(deals)} deals for {config['label']}")
+            return deals
+        elif mode_key == "half_off_plus":
+            min_discount = int(config.get("min_discount") or 50)
+            pages = random.sample(
+                POPULAR_SEARCH_PAGES, k=min(4, len(POPULAR_SEARCH_PAGES))
+            )
+            for sort_by, start in pages:
+                jitter = random.choice([0, 10, 25])
+                deals.extend(
+                    self._get_specials_page(
+                        start=max(0, start + jitter),
+                        count=30,
+                        sort_by=sort_by,
+                    )
+                )
+            discovery_start = random.choice([50, 100, 150, 200, 250])
+            deals.extend(
+                self._get_specials_page(
+                    start=discovery_start,
+                    count=30,
+                    sort_by=random.choice(DISCOVERY_SEARCH_SORTS),
+                )
+            )
+            deals = [
+                deal
+                for deal in deals
+                if self._discount_percent_from_deal(deal) >= min_discount
+            ]
 
-        return self._finalize_collection_deals(deals, config['label'], count=count)
+        return self._finalize_collection_deals(deals, config["label"], count=count)
 
     def get_category_deals(self, category_key, count=COLLECTION_DEAL_COUNT):
         config = DEAL_CATEGORY_CONFIGS.get(category_key)
@@ -1117,40 +1247,62 @@ class SteamDealDetector:
 
         print_progress(f"Loading {config['label']} deals...")
         deals = []
+        pool_count = max(count * 3, 60)
 
         if category_key == "under_5":
-            max_price = config['max_price_usd']
-            for sort_by, start in POPULAR_SEARCH_PAGES:
-                deals.extend(self._get_specials_page(start=start, count=25, sort_by=sort_by))
+            max_price = config["max_price_usd"]
+            pages = random.sample(
+                POPULAR_SEARCH_PAGES, k=min(3, len(POPULAR_SEARCH_PAGES))
+            )
+            for sort_by, start in pages:
+                jitter = random.choice([0, 10, 25])
+                deals.extend(
+                    self._get_specials_page(
+                        start=max(0, start + jitter),
+                        count=25,
+                        sort_by=sort_by,
+                    )
+                )
 
             total = self.get_total_specials_count()
             max_start = min(max(0, (total or 1000) - 50), 1200)
             for _ in range(3):
                 start = random.randint(0, max_start) if max_start > 0 else 0
                 sort_by = random.choice(["Reviews_DESC", "", "Released_DESC"])
-                deals.extend(self._get_specials_page(start=start, count=50, sort_by=sort_by))
+                deals.extend(
+                    self._get_specials_page(start=start, count=50, sort_by=sort_by)
+                )
 
-            deals = self._sample_deals_across_price_buckets(deals, max_price, count=count)
+            deals = self._sample_deals_across_price_buckets(
+                deals, max_price, count=count
+            )
             if not deals:
                 return []
             usual_source = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
             for deal in deals:
-                deal['source'] = usual_source
+                deal["source"] = usual_source
             self._enrich_descriptions(deals)
             print_progress(f"Found {len(deals)} deals for {config['label']}")
             return deals
-        else:
-            data = self._fetch_search_results_json(
-                start=0,
-                count=max(count * 2, 50),
-                sort_by="Reviews_DESC",
-                tags=config['tags'],
-            )
-            if data and data.get('results_html'):
-                source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
-                deals = self._parse_search_results_html(data['results_html'], source_label)
 
-        return self._finalize_collection_deals(deals, config['label'], count=count)
+        # Tagged categories: sample more than one offset so reopening is not the same top 25.
+        starts = random.sample([0, 25, 50, 75, 100, 125, 150], k=2)
+        for start in starts:
+            data = self._fetch_search_results_json(
+                start=start,
+                count=max(pool_count // 2, 40),
+                sort_by=random.choice(["Reviews_DESC", ""]),
+                tags=config["tags"],
+            )
+            if data and data.get("results_html"):
+                source_label = self.get_active_sale_name() or DEFAULT_SOURCE_LABEL
+                deals.extend(
+                    self._parse_search_results_html(
+                        data["results_html"], source_label
+                    )
+                )
+
+        return self._finalize_collection_deals(deals, config["label"], count=count)
 
     def get_random_specials(self, count=STEAM_DEAL_COUNT):
         """Get a balanced set of specials favoring reviewed/popular games.

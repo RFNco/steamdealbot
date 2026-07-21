@@ -4,7 +4,30 @@ All notable changes to SteamDealBot will be documented in this file.
 
 ## [Unreleased]
 
-- Add future changes here before tagging a new version.
+---
+
+## [v2.1.8] - 21-07-2026
+
+### Added
+
+- Deal modes: **Under $10** and **50%+ off favorites**.
+- Categories: **Action** and **Open world**.
+- Expanded Gaming news RSS sources: Eurogamer, Polygon, Xbox Wire, PlayStation Blog, Gematsu, VG247, IGN, GameSpot, Stathetic Blog (pool size 80).
+- Gaming news posted memory: `.manual_poster_posted_news.json`, magenta **Posted** tag before the source, deprioritized for 14 days.
+- Gaming news copy flow: ask **Buffer** first; only offer **save image** when Buffer is skipped or unavailable.
+- News image save detects Cloudflare blocks (e.g. Nintendo Life): copy image URL / open in browser instead of saving HTML.
+- Moved **Gaming news** to the main menu (replaces **Copy 5 deals**): **7** without Buffer, **8** with Buffer.
+
+### Changed
+
+- Deal modes and Categories sample randomized Steam pages / offsets (larger pool, then shuffle) for more variety each open.
+- Removed main-menu **Copy 5 deals** bulk copy; Gaming news removed from Collections & ideas.
+- Deal **Posted** label moved in front of the game name (same pattern as news); uses `THEME["posted"]` (magenta) so it is distinct from yellow source labels.
+- Rolled a few tweet-idea extras and news opener lines for v2.1.8.
+
+### Docs
+
+- README / ROADMAP updated for main-menu Gaming news, new modes/categories, Stathetic Blog rules, and Posted styling.
 
 ---
 

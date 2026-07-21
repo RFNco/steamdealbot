@@ -23,6 +23,7 @@ from steam_deals import (
 from buffer_client import BufferClient
 from news_feeds import (
     DEFAULT_NEWS_LIMIT,
+    NewsImageBlockedError,
     fetch_news_pool,
     format_news_tweets,
     format_published_age,
@@ -37,6 +38,7 @@ import os
 import random
 import shutil
 import subprocess
+import webbrowser
 from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
@@ -51,7 +53,7 @@ except Exception:
     pyperclip = None  # type: ignore
     _HAS_PYPERCLIP = False
 
-VERSION = "v2.1.7"
+VERSION = "v2.1.8"
 
 # Lazily created when BUFFER_API_KEY is set in .env
 _BUFFER_CLIENT: Optional[BufferClient] = None
@@ -61,8 +63,13 @@ POSTED_HISTORY_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     ".manual_poster_posted.json",
 )
+POSTED_NEWS_HISTORY_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    ".manual_poster_posted_news.json",
+)
 POSTED_DEPRIORITIZE_DAYS = 14
 POSTED_HISTORY_MAX_ENTRIES = 300
+POSTED_NEWS_HISTORY_MAX_ENTRIES = 200
 
 BANNER = (
     "   ____________________    __  ___ \n"
@@ -81,7 +88,6 @@ BANNER = (
 )
 
 SEPARATOR = "=" * 45
-BULK_COPY_COUNT = 5
 TWEET_IDEA_COUNT = 5
 TWEET_IDEA_SEPARATOR = "\n\n" + "-" * 30 + "\n\n"
 COLOR_ENABLED = os.environ.get("STEAMDEALBOT_NO_COLOR") != "1"
@@ -119,7 +125,8 @@ THEME = {
     "muted": ANSI_COLORS["gray"],             # hints, separators, deal numbers
     "tweet": ANSI_COLORS["bright_yellow"],    # tweet preview first line
     "success": ANSI_COLORS["bright_green"],   # copied / OK messages
-    "warning": ANSI_COLORS["yellow"],         # Posted tag, soft warnings
+    "warning": ANSI_COLORS["yellow"],         # soft warnings
+    "posted": ANSI_COLORS["bright_magenta"],  # Posted tag (distinct from yellow source labels)
     "error": ANSI_COLORS["bright_red"],       # errors
     "reset": ANSI_COLORS["reset"],
 }
@@ -164,7 +171,7 @@ MENU_STYLES = {
 # Reusable themed tweet ideas (Collections & ideas). Before each version tag, add or
 # swap a few lines in TWEET_IDEA_THEME_EXTRAS, then bump TWEET_IDEA_LAST_ROLLED_VERSION
 # (and the matching version on ROADMAP.md) to match the release you are tagging.
-TWEET_IDEA_LAST_ROLLED_VERSION = "v2.1.7"
+TWEET_IDEA_LAST_ROLLED_VERSION = "v2.1.8"
 TWEET_IDEA_THEMES = {
     "1": (
         "Steam",
@@ -229,8 +236,8 @@ TWEET_IDEA_THEME_EXTRAS = {
         "Steam players: buy the comfort replay or gamble on something totally new? #Steam #Gaming",
         "Buffer-ready Steam question: which deal on your wishlist actually deserves a queue slot today? #SteamDeals",
         "Steam check: is the best find the big-name discount or the under-$10 surprise? #Steam #PCGaming",
-        "Sale-day honesty: did you open Steam to play, or to browse deals again? #SteamDeals #Gaming",
-        "One wishlisted game is on a real discount — grab it, or keep waiting for 'even lower'? #Steam #GameDeals",
+        "Under-$10 Steam finds can outplay full-price regrets. What's your best cheap win? #SteamDeals #PCGaming",
+        "Action sale or open-world rabbit hole: which Steam discount wins your evening? #Steam #Gaming",
     ],
     "2": [
         "Nintendo-style fun is all about games you can pick up anytime and still smile. What has that energy for you? #Nintendo",
@@ -257,7 +264,7 @@ TWEET_IDEA_THEME_EXTRAS = {
         "eShop temptation check: grab the discount now or wait for an even deeper cut? #NintendoDeals #NintendoSwitch",
         "Switch deal night: one sale game, one comfort install, and no promises about sleep. #Nintendo #Gaming",
         "eShop scroll tip: if the trailer makes you smile twice, it might be worth the sale price. #NintendoDeals",
-        "Handheld check: what Switch game still earns a permanent home-screen slot? #NintendoSwitch #Gaming",
+        "Nintendo night plan: one sale grab, one comfort title, and maybe actually sleep. #NintendoSwitch #Gaming",
     ],
     "3": [
         "Gaming backlog status: organized library or beautiful chaos? #Gaming #GameDeals",
@@ -284,7 +291,7 @@ TWEET_IDEA_THEME_EXTRAS = {
         "Queue vs backlog: schedule one post-worthy deal or keep hunting for a better find? #GameDeals #Gaming",
         "Honest gaming mood: hype post, chill rec, or 'would you buy this?' poll energy tonight? #GamingCommunity",
         "Timeline mix idea: one deal, one news take, one 'what are you playing?' — what wins today? #Gaming",
-        "If your feed only showed one game recommendation today, what should it be? #GamingCommunity #GameDeals",
+        "News headline or deal drop: which one actually gets you to open X and post? #GamingCommunity #GameDeals",
     ],
 }
 for theme_key, extra_templates in TWEET_IDEA_THEME_EXTRAS.items():
@@ -429,10 +436,13 @@ def send_tweet_to_buffer(text: str) -> bool:
     return False
 
 
-def prompt_buffer_after_copy(texts: List[str]) -> None:
-    """Optional follow-up: send copied tweet(s) to Buffer after clipboard copy."""
+def prompt_buffer_after_copy(texts: List[str]) -> bool:
+    """Optional follow-up: send copied tweet(s) to Buffer after clipboard copy.
+
+    Returns True if the user chose to queue to Buffer (and at least one send was attempted).
+    """
     if not get_buffer_client() or not texts:
-        return
+        return False
     if len(texts) == 1:
         prompt = "\nAdd this tweet to Buffer queue too? (y/Enter=skip): "
     else:
@@ -442,7 +452,7 @@ def prompt_buffer_after_copy(texts: List[str]) -> None:
         )
     choice = themed_input(prompt, "muted").strip().lower()
     if choice not in ("y", "yes"):
-        return
+        return False
     ok_count = 0
     for index, text in enumerate(texts, 1):
         if len(texts) > 1:
@@ -456,6 +466,7 @@ def prompt_buffer_after_copy(texts: List[str]) -> None:
             f"Queued {ok_count}/{len(texts)} tweet(s) in Buffer.",
             "success" if ok_count == len(texts) else "warning",
         )
+    return True
 
 
 def print_tweet_preview(tweet: str) -> None:
@@ -589,12 +600,88 @@ def is_recently_posted(deal: Dict) -> bool:
     return entry.get("posted_at", 0) >= cutoff
 
 
+def _news_key(item: Dict) -> str:
+    url = (item.get("url") or "").strip().rstrip("/").lower()
+    if url:
+        return url
+    return (item.get("title") or "").strip().lower()
+
+
+def load_posted_news_history() -> Dict[str, Dict]:
+    if not os.path.exists(POSTED_NEWS_HISTORY_FILE):
+        return {}
+
+    try:
+        with open(POSTED_NEWS_HISTORY_FILE, encoding="utf-8") as history_file:
+            data = json.load(history_file)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    entries = data.get("entries", {})
+    return entries if isinstance(entries, dict) else {}
+
+
+def save_posted_news_history(history: Dict[str, Dict]) -> None:
+    sorted_entries = sorted(
+        history.values(),
+        key=lambda entry: entry.get("posted_at", 0),
+        reverse=True,
+    )[:POSTED_NEWS_HISTORY_MAX_ENTRIES]
+    trimmed = {_news_key(entry): entry for entry in sorted_entries}
+
+    with open(POSTED_NEWS_HISTORY_FILE, "w", encoding="utf-8") as history_file:
+        json.dump({"entries": trimmed}, history_file, indent=2)
+
+
+def mark_news_posted(item: Dict) -> None:
+    history = load_posted_news_history()
+    history[_news_key(item)] = {
+        "title": item.get("title", ""),
+        "url": item.get("url", ""),
+        "source": item.get("source", ""),
+        "posted_at": time.time(),
+    }
+    save_posted_news_history(history)
+
+
+def is_recently_posted_news(item: Dict) -> bool:
+    history = load_posted_news_history()
+    entry = history.get(_news_key(item))
+    if not entry:
+        return False
+    cutoff = time.time() - (POSTED_DEPRIORITIZE_DAYS * 86400)
+    return entry.get("posted_at", 0) >= cutoff
+
+
+def deprioritize_posted_news(items: List[Dict]) -> Tuple[List[Dict], int]:
+    history = load_posted_news_history()
+    if not history:
+        return items, 0
+
+    cutoff = time.time() - (POSTED_DEPRIORITIZE_DAYS * 86400)
+    fresh: List[Dict] = []
+    posted: List[Dict] = []
+    for item in items:
+        entry = history.get(_news_key(item))
+        if entry and entry.get("posted_at", 0) >= cutoff:
+            posted.append(item)
+        else:
+            fresh.append(item)
+
+    if posted:
+        random.shuffle(posted)
+    return fresh + posted, len(posted)
+
+
 def print_deal_header(deal_number: int, deal: Dict) -> None:
-    header = color_text(f"\nDeal #{deal_number}", "muted")
+    print(color_text(f"\nDeal #{deal_number}", "muted"))
     if is_recently_posted(deal):
-        header += color_text(" Posted", "warning")
-    print(header)
-    themed_print(deal["name"], "value")
+        print(
+            color_text("Posted ", "posted")
+            + color_text(deal["name"], "value")
+        )
+    else:
+        themed_print(deal["name"], "value")
 
 
 def parse_result_selection(text: str, max_index: int) -> List[int]:
@@ -641,15 +728,17 @@ def print_collection_results(title: str, results: List[Dict]) -> None:
     themed_print(f"\n{title}:", "title")
     themed_print("-" * 30, "muted")
     for index, deal in enumerate(results, 1):
-        posted_tag = color_text(" Posted", "warning") if is_recently_posted(deal) else ""
+        posted_tag = (
+            color_text("Posted ", "posted") if is_recently_posted(deal) else ""
+        )
         price_text = deal.get("price")
         price_suffix = color_text(f" {price_text}", "muted") if price_text else ""
         print(
             color_text(f"{index}. ", "muted")
+            + posted_tag
             + color_text(deal["name"], "value")
             + color_text(f" {deal['discount']}", "muted")
             + price_suffix
-            + posted_tag
         )
 
 
@@ -810,15 +899,6 @@ def copy_to_clipboard(text: str) -> bool:
             pass
 
     return False
-
-
-def format_bulk_tweets(detector: SteamDealDetector, deals: List[Dict]) -> str:
-    """Format multiple deal tweets as one clipboard-friendly batch."""
-    tweets = []
-    for deal in deals:
-        tweets.append(detector.format_deal_tweet(deal))
-
-    return ("\n\n" + "-" * 30 + "\n\n").join(tweets)
 
 
 def fit_tweet_text(text: str) -> str:
@@ -1064,6 +1144,35 @@ def show_deal_categories_menu(detector: SteamDealDetector) -> None:
         show_collection_copy_loop(detector, config["label"], deals)
 
 
+def try_save_news_image(item: Dict) -> None:
+    """Save a news image, or fall back when Cloudflare/bot protection blocks download."""
+    image_url = (item.get("image_url") or "").strip()
+    if not image_url:
+        themed_print("No image available for this headline.", "warning")
+        return
+
+    try:
+        saved = save_news_image(item)
+        if saved:
+            themed_print(f"Image saved: {saved}", "success")
+            themed_print("Attach it manually when posting on X (optional).", "muted")
+        return
+    except NewsImageBlockedError as exc:
+        themed_print(str(exc), "warning")
+        url = exc.image_url or image_url
+        if copy_to_clipboard(url):
+            themed_print("Image URL copied to clipboard instead.", "success")
+        open_now = themed_input(
+            "Open image URL in browser? (y/N): ",
+            MENU_STYLES["prompt"],
+        ).strip().lower()
+        if open_now in {"y", "yes"}:
+            webbrowser.open(url)
+            themed_print("Opened in browser — save/download from there.", "muted")
+    except Exception as exc:  # noqa: BLE001
+        themed_print(f"Could not save image: {exc}", "error")
+
+
 def show_news_menu() -> None:
     """Browse RSS/Atom gaming headlines and copy a news tweet draft."""
     pool: List[Dict] = []
@@ -1087,6 +1196,13 @@ def show_news_menu() -> None:
             themed_print("No news items found right now.", "warning")
             themed_input("\nPress Enter to go back...", "muted")
             return False
+        pool, posted_count = deprioritize_posted_news(pool)
+        if posted_count:
+            themed_print(
+                f"Moved {posted_count} recently copied headline"
+                f"{'s' if posted_count != 1 else ''} to the end for more variety.",
+                "muted",
+            )
         return True
 
     if not load_pool(force=True):
@@ -1125,8 +1241,14 @@ def show_news_menu() -> None:
             age = format_published_age(item.get("published"))
             badge = media_badge(item)
             badge_text = f" {badge}" if badge else ""
+            posted_tag = (
+                color_text("Posted ", "posted")
+                if is_recently_posted_news(item)
+                else ""
+            )
             line = (
                 color_text(f"{index}. ", "muted")
+                + posted_tag
                 + color_text(f"[{item['source']}] ", "label")
                 + color_text(item["title"], "value")
                 + color_text(f"{badge_text}  ({age})", "muted")
@@ -1202,19 +1324,7 @@ def show_news_menu() -> None:
             continue
 
         if draft_pick == "s":
-            if not item.get("image_url"):
-                themed_print("No image available for this headline.", "warning")
-            else:
-                try:
-                    saved = save_news_image(item)
-                    if saved:
-                        themed_print(f"Image saved: {saved}", "success")
-                        themed_print(
-                            "Attach it manually when posting on X (optional).",
-                            "muted",
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    themed_print(f"Could not save image: {exc}", "error")
+            try_save_news_image(item)
             themed_input("\nPress Enter to continue...", "muted")
             continue
 
@@ -1230,19 +1340,20 @@ def show_news_menu() -> None:
         selected = drafts[draft_index - 1]["text"]
         if copy_to_clipboard(selected):
             themed_print(f"{drafts[draft_index - 1]['label']} draft copied!", "success")
-            if item.get("image_url"):
+            mark_news_posted(item)
+            themed_print(
+                "Marked as posted for more variety on future news loads.",
+                "muted",
+            )
+            # Buffer first; only offer local image save when Buffer is skipped/unavailable.
+            buffered = prompt_buffer_after_copy([selected])
+            if not buffered and item.get("image_url"):
                 save_now = themed_input(
-                    "Also save image for this post? (y/N): ",
+                    "Save image for this post? (y/N): ",
                     MENU_STYLES["prompt"],
                 ).strip().lower()
                 if save_now in {"y", "yes"}:
-                    try:
-                        saved = save_news_image(item)
-                        if saved:
-                            themed_print(f"Image saved: {saved}", "success")
-                    except Exception as exc:  # noqa: BLE001
-                        themed_print(f"Could not save image: {exc}", "error")
-            prompt_buffer_after_copy([selected])
+                    try_save_news_image(item)
         else:
             themed_print("Could not copy that draft automatically.", "error")
             themed_print("Please manually copy the selected draft above if needed.", "warning")
@@ -1252,9 +1363,8 @@ def show_news_menu() -> None:
 def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> None:
     collections_options = [
         (1, "Themed tweet ideas", "engagement posts using current deals"),
-        (2, "Deal modes", "big names, indies, hidden gems, deep discounts"),
-        (3, "Categories", "RPG, horror, co-op, cozy, strategy, under $5"),
-        (4, "Gaming news", "RSS headlines → tweet drafts"),
+        (2, "Deal modes", "big names, under $10, 50%+ off, and more"),
+        (3, "Categories", "RPG, action, open world, under $5, and more"),
     ]
 
     while True:
@@ -1272,8 +1382,6 @@ def show_collections_menu(detector: SteamDealDetector, deals: List[Dict]) -> Non
             show_deal_modes_menu(detector)
         elif choice == "3":
             show_deal_categories_menu(detector)
-        elif choice == "4":
-            show_news_menu()
         else:
             themed_print("Invalid choice. Please try again.", "error")
 
@@ -1444,7 +1552,7 @@ def preview_theme_colors() -> None:
         (5, "Refresh"),
         (6, "Collections & ideas"),
         (7, "Nintendo US deals"),
-        (8, "Copy 5 deals"),
+        (8, "Gaming news"),
         (9, "Exit"),
     ):
         print(format_menu_option(number, text, menu_type="steam_buffer"))
@@ -1525,7 +1633,7 @@ def main():
                     (4 + buffer_offset, "Refresh"),
                     (5 + buffer_offset, "Collections & ideas"),
                     (6 + buffer_offset, "Nintendo US deals"),
-                    (7 + buffer_offset, f"Copy {BULK_COPY_COUNT} deals"),
+                    (7 + buffer_offset, "Gaming news"),
                     (8 + buffer_offset, "Exit"),
                 ]
             )
@@ -1588,26 +1696,9 @@ def main():
                 continue
 
             elif choice == str(7 + buffer_offset):
-                bulk_deals = deals[deal_index:deal_index + BULK_COPY_COUNT]
-                bulk_tweet_list = [
-                    detector.format_deal_tweet(bulk_deal) for bulk_deal in bulk_deals
-                ]
-                bulk_tweets = format_bulk_tweets(detector, bulk_deals)
-
-                if copy_to_clipboard(bulk_tweets):
-                    mark_deals_posted(bulk_deals)
-                    themed_print(f"{len(bulk_deals)} deal tweets copied to clipboard! You can now paste them on 𝕏.", "success")
-                    themed_print("Marked those games as posted for more variety on future refreshes.", "muted")
-                    prompt_buffer_after_copy(bulk_tweet_list)
-                else:
-                    themed_print("Could not copy the deal tweets to clipboard automatically.", "error")
-                    if not _HAS_PYPERCLIP:
-                        themed_print("Tip: Install pyperclip with: pip install pyperclip", "warning")
-                    themed_print("Please manually copy the deal tweets below if needed.", "warning")
-                    print_tweet_preview(bulk_tweets)
-
+                show_news_menu()
                 themed_input("\nPress Enter to continue...", "muted")
-                deal_index += len(bulk_deals)
+                continue
 
             elif choice == str(8 + buffer_offset):
                 themed_print("Goodbye!", "success")
